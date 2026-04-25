@@ -24,7 +24,7 @@ import time
 import tkinter as tk
 from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 
 TICK_INTERVAL = 1.0
@@ -432,6 +432,11 @@ class KillerThread(threading.Thread):
             }
             save_state(self._state)
 
+    def reset_break_state(self) -> None:
+        with self._lock:
+            self._state = {"currentBreak": None, "lastBreakEndedAt": None}
+            save_state(self._state)
+
     # -- main loop --
 
     def run(self) -> None:
@@ -747,6 +752,20 @@ def main() -> None:
         f"Wordlist: {len(wordlist)} words ({wordlist_source})"
     ))
     ttk.Label(body, textvariable=info_var, foreground="#888").pack(anchor="w", pady=(12, 0))
+
+    def reset_state() -> None:
+        if not messagebox.askyesno(
+            "Reset break / cooldown",
+            "Clear any active break and cooldown? "
+            "(Soft-mode bypass — for dev iteration.)",
+            parent=root,
+        ):
+            return
+        killer.reset_break_state()
+
+    ttk.Button(body, text="Reset break/cooldown", command=reset_state).pack(
+        anchor="e", pady=(8, 0)
+    )
 
     def refresh() -> None:
         snap = killer.snapshot()
