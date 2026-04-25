@@ -753,17 +753,18 @@ def main() -> None:
     ))
     ttk.Label(body, textvariable=info_var, foreground="#888").pack(anchor="w", pady=(12, 0))
 
+    # DEV-ONLY: reset button. Remove before shipping for real use.
     def reset_state() -> None:
         if not messagebox.askyesno(
             "Reset break / cooldown",
             "Clear any active break and cooldown? "
-            "(Soft-mode bypass — for dev iteration.)",
+            "(Dev-only soft-mode bypass.)",
             parent=root,
         ):
             return
         killer.reset_break_state()
 
-    ttk.Button(body, text="Reset break/cooldown", command=reset_state).pack(
+    ttk.Button(body, text="Reset break/cooldown [dev]", command=reset_state).pack(
         anchor="e", pady=(8, 0)
     )
 
