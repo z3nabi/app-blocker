@@ -2,46 +2,68 @@
 setlocal enabledelayedexpansion
 
 REM ---------------------------------------------------------------------------
-REM run.bat — download latest app-blocker from GitHub and run it.
+REM run.bat - download latest app-blocker from GitHub and run it.
 REM
-REM Save this file anywhere (Desktop is fine), double-click to launch. Each run
-REM downloads the latest main branch into %USERPROFILE%\app-blocker, then runs
-REM `python main.py` from there.
+REM Save anywhere (Desktop is fine), double-click to launch.
 REM ---------------------------------------------------------------------------
 
 set "INSTALL_DIR=%USERPROFILE%\app-blocker"
 set "ZIP_PATH=%TEMP%\app-blocker.zip"
 set "EXTRACT_TMP=%TEMP%\app-blocker-extract"
 set "ZIP_URL=https://github.com/z3nabi/app-blocker/archive/refs/heads/main.zip"
+set "UA=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 echo.
 echo === app-blocker launcher ===
 echo.
 
 echo [1/4] Checking for Python...
-where python >nul 2>&1
-if errorlevel 1 (
-    where py >nul 2>&1
-    if errorlevel 1 (
-        echo ERROR: Neither 'python' nor 'py' was found on PATH.
-        echo Install Python from python.org, or ask IT to add it.
-        pause
-        exit /b 1
-    )
-    set "PY=py"
-) else (
-    set "PY=python"
+set "PY="
+where python >nul 2>&1 && set "PY=python"
+if "!PY!"=="" (
+    where py >nul 2>&1 && set "PY=py"
+)
+if "!PY!"=="" (
+    echo ERROR: Neither 'python' nor 'py' was found on PATH.
+    pause
+    exit /b 1
 )
 echo Using: !PY!
 
 echo.
-echo [2/4] Downloading latest from GitHub...
-powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%ZIP_PATH%' -UseBasicParsing"
-if errorlevel 1 (
-    echo ERROR: Download failed. Check network or GitHub access.
-    pause
-    exit /b 1
+echo [2/4] Downloading from GitHub...
+if exist "%ZIP_PATH%" del "%ZIP_PATH%" >nul 2>&1
+
+REM Try curl.exe first (built into Win10+, often handles corp proxies well)
+where curl.exe >nul 2>&1
+if not errorlevel 1 (
+    echo   trying curl.exe...
+    curl.exe -fsSL -A "%UA%" --proxy-anyauth -o "%ZIP_PATH%" "%ZIP_URL%" 2>nul
+    if not errorlevel 1 if exist "%ZIP_PATH%" goto :downloaded
+    echo   curl.exe failed, trying PowerShell...
 )
+
+REM Fallback: PowerShell with default credentials + browser UA
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; try { [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials } catch {}; Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%ZIP_PATH%' -UseBasicParsing -UserAgent '%UA%' -UseDefaultCredentials"
+if errorlevel 1 goto :download_failed
+if not exist "%ZIP_PATH%" goto :download_failed
+goto :downloaded
+
+:download_failed
+echo.
+echo ERROR: All download methods failed.
+echo.
+echo Workaround: download this URL manually in your browser:
+echo   %ZIP_URL%
+echo Save it as:
+echo   %ZIP_PATH%
+echo Then re-run this script.
+echo.
+pause
+exit /b 1
+
+:downloaded
+echo   downloaded to %ZIP_PATH%
 
 echo.
 echo [3/4] Extracting to %INSTALL_DIR%...
