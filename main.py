@@ -1,9 +1,9 @@
-"""App Blocker — Phase 4: schedule + word-challenge allowance break.
+"""App Blocker — schedule-driven blocker with allowance-break challenge.
 
-Config:    ~/.app-blocker/config.json   (user-editable)
+Config:    ~/.app-blocker/config.json   (user-editable; in-app editor too)
 State:     ~/.app-blocker/state.json    (managed by app — current break, last
                                          break end for cooldown)
-Wordlist:  words.txt next to this file
+Wordlist:  words.txt next to this file (or embedded fallback)
 
 Run:
     python main.py     (Windows)
@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import uuid
 from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -97,6 +98,15 @@ def load_or_create_config() -> dict:
         path.write_text(json.dumps(DEFAULT_CONFIG, indent=2))
         return json.loads(json.dumps(DEFAULT_CONFIG))
     return json.loads(path.read_text())
+
+
+def save_config(config: dict) -> None:
+    """Atomic write: tempfile + rename."""
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(config, indent=2))
+    tmp.replace(path)
 
 
 def load_state() -> dict:
@@ -634,6 +644,94 @@ class ChallengeModal:
 
 
 # ---------------------------------------------------------------------------
+# Process picker (modal)
+# ---------------------------------------------------------------------------
+
+class AppPicker:
+    def __init__(self, parent: tk.Tk, on_pick) -> None:
+        self.on_pick = on_pick
+        self.win = tk.Toplevel(parent)
+        self.win.title("Add app to block list")
+        self.win.geometry("460x520")
+        self.win.transient(parent)
+        self.win.grab_set()
+
+        header = ttk.Frame(self.win, padding=(12, 12, 12, 4))
+        header.pack(fill=tk.X)
+        ttk.Label(header, text="Pick a running process to block:",
+                  font=("TkDefaultFont", 11, "bold")).pack(anchor="w")
+        ttk.Label(header,
+                  text="Tip: open the app you want to block first, then click Refresh.",
+                  foreground="#666").pack(anchor="w", pady=(2, 0))
+
+        search_row = ttk.Frame(self.win, padding=(12, 4, 12, 4))
+        search_row.pack(fill=tk.X)
+        ttk.Label(search_row, text="Filter:").pack(side=tk.LEFT)
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *a: self._refilter())
+        ttk.Entry(search_row, textvariable=self.search_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0)
+        )
+
+        list_frame = ttk.Frame(self.win, padding=(12, 4, 12, 8))
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(list_frame)
+        self.listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, activestyle="none")
+        scrollbar.config(command=self.listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.listbox.bind("<Double-Button-1>", lambda e: self._on_add())
+        self.listbox.bind("<Return>", lambda e: self._on_add())
+
+        btns = ttk.Frame(self.win, padding=(12, 0, 12, 12))
+        btns.pack(fill=tk.X)
+        ttk.Button(btns, text="Refresh", command=self._refresh).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Add", command=self._on_add).pack(side=tk.RIGHT, padx=4)
+
+        self._all: list[str] = []
+        self._refresh()
+
+        # Center on parent
+        self.win.update_idletasks()
+        try:
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            ww = self.win.winfo_width()
+            wh = self.win.winfo_height()
+            self.win.geometry(f"+{px + (pw - ww) // 2}+{py + (ph - wh) // 2}")
+        except Exception:
+            pass
+
+    def _refresh(self) -> None:
+        try:
+            procs, _ = list_processes()
+        except Exception:
+            procs = []
+        self._all = sorted({n for _, n in procs}, key=str.lower)
+        self._refilter()
+
+    def _refilter(self) -> None:
+        q = self.search_var.get().lower().strip()
+        self.listbox.delete(0, tk.END)
+        for name in self._all:
+            if q in name.lower():
+                self.listbox.insert(tk.END, name)
+
+    def _on_add(self) -> None:
+        sel = self.listbox.curselection()
+        if not sel:
+            return
+        name = self.listbox.get(sel[0])
+        try:
+            self.on_pick(name)
+        finally:
+            self.win.destroy()
+
+
+# ---------------------------------------------------------------------------
 # Main UI
 # ---------------------------------------------------------------------------
 
@@ -673,7 +771,8 @@ def main() -> None:
 
     root = tk.Tk()
     root.title("App Blocker")
-    root.geometry("640x540")
+    root.geometry("700x620")
+    root.minsize(560, 500)
 
     def on_close() -> None:
         killer.stop()
@@ -681,7 +780,7 @@ def main() -> None:
 
     root.protocol("WM_DELETE_WINDOW", on_close)
 
-    # Banner
+    # ---- Banner ----
     banner_frame = tk.Frame(root, bg="#888")
     banner_frame.pack(fill=tk.X)
     banner_label = tk.Label(
@@ -690,13 +789,9 @@ def main() -> None:
     )
     banner_label.pack(fill=tk.X, padx=12, pady=10)
 
-    # Body
-    body = ttk.Frame(root, padding=12)
-    body.pack(fill=tk.BOTH, expand=True)
-
-    # Break controls
-    break_row = ttk.Frame(body)
-    break_row.pack(fill=tk.X, pady=(0, 8))
+    # ---- Always-visible break row ----
+    break_row = ttk.Frame(root, padding=(12, 8, 12, 0))
+    break_row.pack(fill=tk.X)
     break_btn = ttk.Button(break_row, text="Take allowance break")
     break_btn.pack(side=tk.LEFT)
     break_status_var = tk.StringVar(value="")
@@ -715,43 +810,34 @@ def main() -> None:
 
     break_btn.config(command=open_challenge)
 
-    ttk.Separator(body, orient="horizontal").pack(fill=tk.X, pady=4)
+    # ---- Notebook ----
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-    # Config / schedule summary
-    config_path_var = tk.StringVar(value=f"Config: {config_path()}")
-    ttk.Label(body, textvariable=config_path_var, foreground="#666",
-              font=("TkFixedFont", 10)).pack(anchor="w", pady=(4, 0))
-    ttk.Label(body, text="(Edit that file to customize. Changes apply within ~1 second.)",
-              foreground="#888").pack(anchor="w")
+    # ===== Status tab =====
+    status_tab = ttk.Frame(notebook, padding=12)
+    notebook.add(status_tab, text="Status")
 
     today_var = tk.StringVar(value="")
-    ttk.Label(body, text="Today's schedule:").pack(anchor="w", pady=(8, 0))
-    ttk.Label(body, textvariable=today_var, foreground="#222",
-              font=("TkFixedFont", 11)).pack(anchor="w")
-
-    blocked_var = tk.StringVar(value="")
-    ttk.Label(body, text="Blocked apps:").pack(anchor="w", pady=(8, 0))
-    ttk.Label(body, textvariable=blocked_var, foreground="#222",
-              font=("TkFixedFont", 11), wraplength=600, justify="left").pack(anchor="w")
-
-    ttk.Separator(body, orient="horizontal").pack(fill=tk.X, pady=10)
-
+    blocked_summary_var = tk.StringVar(value="")
     status_var = tk.StringVar(value="Killer thread starting…")
-    ttk.Label(body, textvariable=status_var, font=("TkDefaultFont", 11)).pack(anchor="w")
-
     last_var = tk.StringVar(value="")
-    ttk.Label(body, textvariable=last_var, foreground="#0a7",
-              wraplength=600, justify="left").pack(anchor="w", pady=(4, 0))
-
     error_var = tk.StringVar(value="")
-    ttk.Label(body, textvariable=error_var, foreground="#b00020",
-              wraplength=600, justify="left").pack(anchor="w", pady=(4, 0))
+    info_var = tk.StringVar(value="")
 
-    info_var = tk.StringVar(value=(
-        f"Python {sys.version.split()[0]} on {platform.system()} {platform.release()}\n"
-        f"Wordlist: {len(wordlist)} words ({wordlist_source})"
-    ))
-    ttk.Label(body, textvariable=info_var, foreground="#888").pack(anchor="w", pady=(12, 0))
+    ttk.Label(status_tab, text="Today's schedule:").pack(anchor="w")
+    ttk.Label(status_tab, textvariable=today_var, font=("TkFixedFont", 11)).pack(anchor="w")
+    ttk.Label(status_tab, text="Blocked apps:").pack(anchor="w", pady=(8, 0))
+    ttk.Label(status_tab, textvariable=blocked_summary_var, font=("TkFixedFont", 11),
+              wraplength=640, justify="left").pack(anchor="w")
+    ttk.Separator(status_tab, orient="horizontal").pack(fill=tk.X, pady=10)
+    ttk.Label(status_tab, textvariable=status_var, font=("TkDefaultFont", 11)).pack(anchor="w")
+    ttk.Label(status_tab, textvariable=last_var, foreground="#0a7",
+              wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
+    ttk.Label(status_tab, textvariable=error_var, foreground="#b00020",
+              wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
+    ttk.Label(status_tab, textvariable=info_var, foreground="#888",
+              justify="left").pack(anchor="w", pady=(12, 0))
 
     # DEV-ONLY: reset button. Remove before shipping for real use.
     def reset_state() -> None:
@@ -764,17 +850,149 @@ def main() -> None:
             return
         killer.reset_break_state()
 
-    ttk.Button(body, text="Reset break/cooldown [dev]", command=reset_state).pack(
+    ttk.Button(status_tab, text="Reset break/cooldown [dev]", command=reset_state).pack(
         anchor="e", pady=(8, 0)
     )
 
+    # ===== Apps tab =====
+    apps_tab = ttk.Frame(notebook, padding=12)
+    notebook.add(apps_tab, text="Apps")
+
+    ttk.Label(apps_tab,
+              text="These process names are killed during scheduled block windows.",
+              ).pack(anchor="w")
+
+    apps_frame = ttk.Frame(apps_tab)
+    apps_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 8))
+    apps_scroll = ttk.Scrollbar(apps_frame)
+    apps_listbox = tk.Listbox(apps_frame, yscrollcommand=apps_scroll.set, activestyle="none")
+    apps_scroll.config(command=apps_listbox.yview)
+    apps_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    apps_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    displayed_app_ids: list[str] = []
+
+    def refresh_apps_list() -> None:
+        snap = killer.snapshot()
+        apps = snap["config"].get("blockedApps", [])
+        sel = apps_listbox.curselection()
+        sel_idx = sel[0] if sel else None
+        apps_listbox.delete(0, tk.END)
+        displayed_app_ids.clear()
+        for app in apps:
+            display = app.get("displayName", "(unnamed)")
+            names = app.get("matchers", {}).get("names", [])
+            apps_listbox.insert(tk.END, f"{display}  —  {', '.join(names)}")
+            displayed_app_ids.append(app.get("id", ""))
+        if sel_idx is not None and sel_idx < len(apps):
+            apps_listbox.selection_set(sel_idx)
+
+    def add_app_via_picker() -> None:
+        def on_pick(name: str) -> None:
+            snap = killer.snapshot()
+            cfg = json.loads(json.dumps(snap["config"]))
+            cfg.setdefault("blockedApps", []).append({
+                "id": str(uuid.uuid4()),
+                "displayName": name,
+                "matchers": {"names": [name]},
+            })
+            save_config(cfg)
+
+        AppPicker(root, on_pick=on_pick)
+
+    def remove_selected_app() -> None:
+        sel = apps_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(displayed_app_ids):
+            return
+        app_id = displayed_app_ids[idx]
+        snap = killer.snapshot()
+        cfg = json.loads(json.dumps(snap["config"]))
+        cfg["blockedApps"] = [a for a in cfg.get("blockedApps", []) if a.get("id") != app_id]
+        save_config(cfg)
+
+    apps_btns = ttk.Frame(apps_tab)
+    apps_btns.pack(fill=tk.X)
+    ttk.Button(apps_btns, text="Add…", command=add_app_via_picker).pack(side=tk.LEFT)
+    ttk.Button(apps_btns, text="Remove selected", command=remove_selected_app).pack(
+        side=tk.LEFT, padx=8
+    )
+
+    # ===== Settings tab =====
+    settings_tab = ttk.Frame(notebook, padding=12)
+    notebook.add(settings_tab, text="Settings")
+
+    break_var = tk.IntVar(value=10)
+    cooldown_var = tk.IntVar(value=30)
+    words_var = tk.IntVar(value=50)
+    settings_loading = [False]
+
+    def write_settings_from_vars() -> None:
+        if settings_loading[0]:
+            return
+        snap = killer.snapshot()
+        cfg = json.loads(json.dumps(snap["config"]))
+        try:
+            br = max(1, int(break_var.get()))
+            cd = max(0, int(cooldown_var.get()))
+            wc = max(1, min(int(words_var.get()), len(wordlist)))
+        except (TypeError, ValueError, tk.TclError):
+            return
+        cfg.setdefault("settings", {})
+        cfg["settings"]["breakDurationMinutes"] = br
+        cfg["settings"]["cooldownMinutes"] = cd
+        cfg["settings"]["challengeWordCount"] = wc
+        save_config(cfg)
+
+    def load_settings_from_config(cfg: dict) -> None:
+        s = cfg.get("settings", {}) or {}
+        settings_loading[0] = True
+        try:
+            break_var.set(int(s.get("breakDurationMinutes", 10)))
+            cooldown_var.set(int(s.get("cooldownMinutes", 30)))
+            words_var.set(int(s.get("challengeWordCount", 50)))
+        except (TypeError, ValueError):
+            pass
+        finally:
+            settings_loading[0] = False
+
+    grid = ttk.Frame(settings_tab)
+    grid.pack(fill=tk.X)
+
+    spinboxes: list[tk.Spinbox] = []
+
+    def add_setting_row(row: int, label: str, var: tk.IntVar,
+                        lo: int, hi: int, suffix: str) -> tk.Spinbox:
+        ttk.Label(grid, text=label).grid(row=row, column=0, sticky="w", pady=4)
+        sb = tk.Spinbox(grid, from_=lo, to=hi, textvariable=var, width=6,
+                        command=write_settings_from_vars)
+        sb.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        ttk.Label(grid, text=suffix, foreground="#666").grid(row=row, column=2, sticky="w")
+        sb.bind("<FocusOut>", lambda e: write_settings_from_vars())
+        sb.bind("<Return>", lambda e: write_settings_from_vars())
+        spinboxes.append(sb)
+        return sb
+
+    add_setting_row(0, "Break duration:", break_var, 1, 240, "minutes")
+    add_setting_row(1, "Cooldown after break:", cooldown_var, 0, 240, "minutes")
+    add_setting_row(2, "Challenge word count:", words_var, 1, len(wordlist), "words")
+
+    ttk.Label(settings_tab,
+              text="Saves on focus-out, Enter, or arrow click.",
+              foreground="#666").pack(anchor="w", pady=(12, 0))
+
+    load_settings_from_config(killer.snapshot()["config"])
+
+    # ---- Refresh loop ----
     def refresh() -> None:
         snap = killer.snapshot()
         cfg = snap["config"]
         window = snap["active_window"]
         now = datetime.now()
 
-        # Banner state
+        # Banner
         ends_at = killer.break_ends_at()
         if ends_at and datetime.now() < ends_at:
             remaining = (ends_at - datetime.now()).total_seconds()
@@ -782,17 +1000,15 @@ def main() -> None:
             text = f"  Break active — {_format_remaining(remaining)} remaining"
         elif window:
             color = "#b00020"
-            text = (
-                f"  Blocking active until {window.get('end','?')}"
-                f"  ({window.get('start','?')}–{window.get('end','?')})"
-            )
+            text = (f"  Blocking active until {window.get('end','?')}"
+                    f"  ({window.get('start','?')}–{window.get('end','?')})")
         else:
             color = "#888"
             text = "  No active block"
         banner_frame.config(bg=color)
         banner_label.config(bg=color, text=text)
 
-        # Break button state
+        # Break button
         ok, reason = killer.can_take_break()
         if ok:
             break_btn.state(["!disabled"])
@@ -801,8 +1017,9 @@ def main() -> None:
             break_btn.state(["disabled"])
             break_status_var.set(reason)
 
+        # Status tab labels
         today_var.set(_summarize_schedule_today(cfg.get("schedule", {}), now))
-        blocked_var.set(_summarize_blocked(cfg))
+        blocked_summary_var.set(_summarize_blocked(cfg))
 
         kills = snap["kills"]
         last_tick = snap["last_tick_at"]
@@ -822,6 +1039,20 @@ def main() -> None:
 
         err = snap["config_error"]
         error_var.set(f"Config error: {err}" if err else "")
+
+        info_var.set(
+            f"Python {sys.version.split()[0]} on {platform.system()} {platform.release()}\n"
+            f"Wordlist: {len(wordlist)} words ({wordlist_source})\n"
+            f"Config: {config_path()}"
+        )
+
+        refresh_apps_list()
+
+        # Reload settings from config only when no spinbox has focus,
+        # so an external edit propagates without trampling user input.
+        focused = root.focus_get()
+        if focused not in spinboxes:
+            load_settings_from_config(cfg)
 
         root.after(500, refresh)
 
