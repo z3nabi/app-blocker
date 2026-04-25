@@ -115,13 +115,81 @@ def save_state(state: dict) -> None:
     path.write_text(json.dumps(state, indent=2))
 
 
-def load_wordlist() -> list[str]:
-    try:
-        text = words_path().read_text()
-    except OSError:
-        return ["typing", "this", "is", "the", "deterrent"]
-    words = [w.strip() for w in text.splitlines() if w.strip()]
-    return words or ["fallback"]
+_FALLBACK_WORDS = (
+    "about above across action active actual adopt after again agent agree "
+    "ahead alarm alert alike alive allow alone along alpha alter among anger "
+    "angle angry apart apple apply argue arise arrow aside audio avoid awake "
+    "award aware basic basin batch beach bench black blade blame blank blast "
+    "bleed blend bless blind blink block blood bloom blown board boost booth "
+    "bound brain brake brand brave bread break brick brief bring broad broke "
+    "brown brush build built bunch burst buyer cabin cable candy carry catch "
+    "chain chair chalk charm chart chase check cheer chess chest chief child "
+    "civil claim class clean clear clerk click cliff climb clock close cloth "
+    "cloud coach coast color cover craft crash cream creek crest crime crisp "
+    "cross crowd crown crude cruel crush cycle daily dance death debit debut "
+    "delay delta demon dense depth dirty diver dizzy dough dozen drain drama "
+    "dream dress drink drive drove drown drunk eagle early earth eaten echo "
+    "eight elbow elder elect empty enemy enjoy enter entry equal error event "
+    "every exact exist extra fable faint faith false fancy fatal fault favor "
+    "fence ferry fetch fever fiber field fifth fifty fight final first fixed "
+    "flame flash fleet flesh flint float flock flood floor flour flute focus "
+    "force forge forth forty forum found frame fraud fresh front frost fruit "
+    "funny ghost giant given glare glass gleam glide globe gloom glory glove "
+    "going grace grade grain grand grant grape graph grasp grass grave great "
+    "greed green greet grief grill grind gross group grown grunt guard guess "
+    "guest guide guild habit happy heart heavy hedge hello hover human humor "
+    "hurry ideal image index inner input issue ivory jelly jewel joint juice "
+    "kayak knack knife knock known label large laser later laugh lazy learn "
+    "least leave legal lemon level light limit linen liver lobby local logic "
+    "loose loyal lunar lunch magic major maple march match maybe mayor medal "
+    "media metal meter might minor mixed model moist money month moral mount "
+    "mouse mouth movie nasty nerve never night noble noise north novel ocean "
+    "offer often olive onion opera orbit order ought ounce outer owner paint "
+    "panel panic paper party patch peace pearl penny phase photo piano piece "
+    "pilot pizza plane plant plate plaza poem point polar porch pouch pound "
+    "power press price pride prime print prior prize proof proud pulse punch "
+    "purse quart queen quest queue quick quiet quilt quirk quite quote radar "
+    "radio rapid ratio reach react ready realm relay reply reset resin ridge "
+    "rigid rinse rival river roast rocky rough round royal rusty sadly salad "
+    "sandy sauce scale scarf scene scent scout scrap scrub seven shake shall "
+    "shape share sharp sheep sheet shelf shell shift shine shiny shirt shock "
+    "short shout shown shrub sight silly since sixth skate skill slate sleep "
+    "slept slice slide slope small smart smell smile smoke smoky snack snake "
+    "snore snowy solid solve sorry sound south spade spare spark speak speed "
+    "spell spend spent spice spike spine spoke spoon sport spray stack staff "
+    "stage stair stamp stand stark state steam steel steep stern stick still "
+    "sting stock stone stool storm story stove straw strip stuck study stuff "
+    "style sugar sweep sweet swift swing table tally taste teach teeth tempo "
+    "tenor tense thank theft their theme there thick thief thigh thing think "
+    "third thorn those three threw throw thumb tidal tight tiger timer tired "
+    "toast today token tooth topic torch total touch tough tower toxic trace "
+    "track trade trail train trait trash treat trend trial tribe trick tried "
+    "troop trout truck truly trunk trust truth tulip tutor twice twist ultra "
+    "uncle under unite unity until upper upset urban usage usual vague valid "
+    "value vapor vault verge verse video viola vital vivid vocal voice vowel "
+    "wagon waltz water waver wedge weigh weird whale wharf wheat wheel whirl "
+    "white whole wider witch woven wrist write wrong yacht yeast yield young "
+    "youth zebra"
+).split()
+
+
+def load_wordlist() -> tuple[list[str], str]:
+    """Return (words, source_description). Tries words.txt next to the script
+    and in cwd; otherwise returns the embedded fallback.
+    """
+    candidates = [
+        Path(__file__).resolve().parent / "words.txt",
+        Path.cwd() / "words.txt",
+    ]
+    for p in candidates:
+        try:
+            text = p.read_text()
+        except OSError:
+            continue
+        words = [w.strip().lower() for w in text.splitlines() if w.strip()]
+        if len(words) >= 50:
+            return words, f"file: {p}"
+    return list(_FALLBACK_WORDS), f"embedded ({len(_FALLBACK_WORDS)} words)"
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +540,7 @@ class ChallengeModal:
         self.entry.pack(fill=tk.X, pady=(8, 8))
         self.entry.bind("<space>", self._on_separator)
         self.entry.bind("<Return>", self._on_separator)
+        self.entry.bind("<KeyRelease>", self._on_keyrelease)
         self.entry.focus_set()
 
         ttk.Button(bottom, text="Cancel", command=self._cancel).pack(anchor="e")
@@ -506,6 +575,27 @@ class ChallengeModal:
     def _progress_text(self) -> str:
         return f"{self.idx} / {len(self.words)}"
 
+    def _flash_red(self) -> None:
+        orig_bg = self.entry.cget("background")
+        self.entry.config(background="#ffb3b3")
+        self.entry.after(160, lambda: self.entry.config(background=orig_bg))
+
+    def _on_keyrelease(self, event):
+        # Space/Return are handled by _on_separator. Backspace shouldn't trigger
+        # a typo since the user is correcting; let them shorten the entry freely.
+        if event.keysym in ("space", "Return", "BackSpace", "Delete", "Left", "Right",
+                            "Home", "End", "Tab", "Shift_L", "Shift_R", "Caps_Lock"):
+            return
+        if self.idx >= len(self.words):
+            return
+        typed = self.entry.get()
+        if not typed:
+            return
+        target = self.words[self.idx].lower()
+        if not target.startswith(typed.lower()):
+            self.entry.delete(0, tk.END)
+            self._flash_red()
+
     def _on_separator(self, event):
         typed = self.entry.get().strip()
         if not typed:
@@ -519,9 +609,8 @@ class ChallengeModal:
             if self.idx >= len(self.words):
                 self._complete()
         else:
-            orig_bg = self.entry.cget("background")
-            self.entry.config(background="#ffb3b3")
-            self.entry.after(160, lambda: self.entry.config(background=orig_bg))
+            # User pressed space too early (entry is a valid prefix but not full word).
+            self._flash_red()
             self.entry.delete(0, tk.END)
         return "break"
 
@@ -571,7 +660,7 @@ def _format_remaining(seconds: float) -> str:
 
 def main() -> None:
     load_or_create_config()
-    wordlist = load_wordlist()
+    wordlist, wordlist_source = load_wordlist()
 
     killer = KillerThread()
     killer.start()
@@ -654,8 +743,8 @@ def main() -> None:
               wraplength=600, justify="left").pack(anchor="w", pady=(4, 0))
 
     info_var = tk.StringVar(value=(
-        f"Python {sys.version.split()[0]} on {platform.system()} {platform.release()}  |  "
-        f"{len(wordlist)} words in dictionary"
+        f"Python {sys.version.split()[0]} on {platform.system()} {platform.release()}\n"
+        f"Wordlist: {len(wordlist)} words ({wordlist_source})"
     ))
     ttk.Label(body, textvariable=info_var, foreground="#888").pack(anchor="w", pady=(12, 0))
 
