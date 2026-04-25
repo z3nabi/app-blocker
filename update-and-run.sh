@@ -1,36 +1,22 @@
 #!/usr/bin/env bash
-# run.sh — download latest app-blocker from GitHub and run it (macOS / Linux).
-# Save anywhere, chmod +x, double-click or `./run.sh` to launch.
-
+# Thin wrapper around update_and_run.py.
 set -euo pipefail
 
-INSTALL_DIR="$HOME/app-blocker"
-ZIP_PATH="/tmp/app-blocker.zip"
-EXTRACT_TMP="/tmp/app-blocker-extract"
-ZIP_URL="https://github.com/z3nabi/app-blocker/archive/refs/heads/main.zip"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$SCRIPT_DIR/update_and_run.py"
 
-echo "=== app-blocker launcher ==="
+if [ ! -f "$SCRIPT" ]; then
+    echo "ERROR: update_and_run.py not found next to this script." >&2
+    echo "  Expected: $SCRIPT" >&2
+    echo "  Download from: https://raw.githubusercontent.com/z3nabi/app-blocker/main/update_and_run.py" >&2
+    exit 1
+fi
 
 if command -v python3 >/dev/null 2>&1; then
-    PY=python3
+    exec python3 "$SCRIPT" "$@"
 elif command -v python >/dev/null 2>&1; then
-    PY=python
+    exec python "$SCRIPT" "$@"
 else
     echo "ERROR: python3/python not found on PATH" >&2
     exit 1
 fi
-echo "Using: $PY"
-
-echo "Downloading latest..."
-curl -fsSL "$ZIP_URL" -o "$ZIP_PATH"
-
-echo "Extracting to $INSTALL_DIR..."
-rm -rf "$EXTRACT_TMP" "$INSTALL_DIR"
-mkdir -p "$EXTRACT_TMP"
-unzip -q "$ZIP_PATH" -d "$EXTRACT_TMP"
-mv "$EXTRACT_TMP/app-blocker-main" "$INSTALL_DIR"
-rm -rf "$EXTRACT_TMP" "$ZIP_PATH"
-
-echo "Starting app-blocker..."
-cd "$INSTALL_DIR"
-exec "$PY" main.py
