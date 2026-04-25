@@ -12,13 +12,20 @@ Python-script-based implementation that runs via the already-allowlisted `python
 
 ## Run
 
-Requires Python 3.9+. No dependencies for the smoke test.
+Requires Python 3.9+. No dependencies needed.
+
+### One-shot launcher (downloads latest, then runs)
+
+**Windows:** save [run.bat](https://raw.githubusercontent.com/z3nabi/app-blocker/main/run.bat) anywhere (e.g. Desktop). Double-click to launch. Each run pulls the latest from GitHub.
+
+**macOS/Linux:** save [run.sh](https://raw.githubusercontent.com/z3nabi/app-blocker/main/run.sh), `chmod +x run.sh`, then `./run.sh`.
+
+### Or run from a checkout
 
 ```
-python main.py
+python main.py     # Windows
+python3 main.py    # macOS
 ```
-
-A window should open showing running processes. If it does, the platform is viable.
 
 ## Optional speedup
 
