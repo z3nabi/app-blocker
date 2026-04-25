@@ -732,6 +732,113 @@ class AppPicker:
 
 
 # ---------------------------------------------------------------------------
+# Schedule window editor (modal)
+# ---------------------------------------------------------------------------
+
+class ScheduleWindowEditor:
+    """Modal dialog for adding or editing a single schedule window."""
+
+    def __init__(self, parent: tk.Tk, on_save, *, day: str | None = None,
+                 start: str | None = None, end: str | None = None,
+                 title: str = "Add schedule window") -> None:
+        self.on_save = on_save
+        self.win = tk.Toplevel(parent)
+        self.win.title(title)
+        self.win.geometry("340x220")
+        self.win.transient(parent)
+        self.win.grab_set()
+        self.win.resizable(False, False)
+
+        body = ttk.Frame(self.win, padding=16)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(body, text="Day:").grid(row=0, column=0, sticky="w", pady=4)
+        day_default = DAY_NAMES.get(day or "mon", "Mon")
+        self.day_var = tk.StringVar(value=day_default)
+        day_options = [DAY_NAMES[d] for d in DAY_KEYS]
+        ttk.Combobox(body, textvariable=self.day_var, values=day_options,
+                     state="readonly", width=8).grid(
+            row=0, column=1, sticky="w", padx=(8, 0), pady=4)
+
+        ttk.Label(body, text="Start (HH:MM):").grid(row=1, column=0, sticky="w", pady=4)
+        self.start_var = tk.StringVar(value=start or "09:00")
+        ttk.Entry(body, textvariable=self.start_var, width=8).grid(
+            row=1, column=1, sticky="w", padx=(8, 0), pady=4)
+
+        ttk.Label(body, text="End (HH:MM):").grid(row=2, column=0, sticky="w", pady=4)
+        self.end_var = tk.StringVar(value=end or "17:00")
+        ttk.Entry(body, textvariable=self.end_var, width=8).grid(
+            row=2, column=1, sticky="w", padx=(8, 0), pady=4)
+
+        self.error_var = tk.StringVar(value="")
+        ttk.Label(body, textvariable=self.error_var, foreground="#b00020",
+                  wraplength=300, justify="left").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        btns = ttk.Frame(self.win, padding=(16, 0, 16, 16))
+        btns.pack(fill=tk.X)
+        ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side=tk.RIGHT, padx=(8, 0))
+        ttk.Button(btns, text="Save", command=self._on_save).pack(side=tk.RIGHT)
+        self.win.bind("<Return>", lambda e: self._on_save())
+
+        # Center
+        self.win.update_idletasks()
+        try:
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            ww = self.win.winfo_width()
+            wh = self.win.winfo_height()
+            self.win.geometry(f"+{px + (pw - ww) // 2}+{py + (ph - wh) // 2}")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _validate_hhmm(s: str) -> tuple[bool, str]:
+        """Accepts '09:00', '9:00', '09:5', etc. Normalizes to 'HH:MM'."""
+        s = s.strip()
+        if ":" not in s:
+            return False, ""
+        parts = s.split(":")
+        if len(parts) != 2:
+            return False, ""
+        try:
+            h = int(parts[0])
+            m = int(parts[1])
+        except ValueError:
+            return False, ""
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            return False, ""
+        return True, f"{h:02d}:{m:02d}"
+
+    def _on_save(self) -> None:
+        day_name = self.day_var.get()
+        day_key = next((k for k, v in DAY_NAMES.items() if v == day_name), None)
+        if not day_key:
+            self.error_var.set("Pick a day.")
+            return
+        ok_s, start = self._validate_hhmm(self.start_var.get())
+        ok_e, end = self._validate_hhmm(self.end_var.get())
+        if not ok_s:
+            self.error_var.set("Start must be HH:MM (e.g. 09:00).")
+            return
+        if not ok_e:
+            self.error_var.set("End must be HH:MM (e.g. 17:00).")
+            return
+        if start >= end:
+            self.error_var.set(
+                "End must be later than start. "
+                "For cross-midnight, split into two days."
+            )
+            return
+        try:
+            self.on_save(day_key, start, end)
+        finally:
+            self.win.destroy()
+
+
+# ---------------------------------------------------------------------------
 # Main UI
 # ---------------------------------------------------------------------------
 
@@ -920,6 +1027,131 @@ def main() -> None:
         side=tk.LEFT, padx=8
     )
 
+    # ===== Schedule tab =====
+    schedule_tab = ttk.Frame(notebook, padding=12)
+    notebook.add(schedule_tab, text="Schedule")
+
+    ttk.Label(
+        schedule_tab,
+        text="Time windows during which blocked apps are killed (local 24h time).",
+    ).pack(anchor="w")
+
+    sched_frame = ttk.Frame(schedule_tab)
+    sched_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 8))
+
+    sched_scroll = ttk.Scrollbar(sched_frame, orient="vertical")
+    sched_tree = ttk.Treeview(
+        sched_frame,
+        columns=("day", "start", "end"),
+        show="headings",
+        height=10,
+        yscrollcommand=sched_scroll.set,
+    )
+    sched_scroll.config(command=sched_tree.yview)
+    sched_tree.heading("day", text="Day")
+    sched_tree.heading("start", text="Start")
+    sched_tree.heading("end", text="End")
+    sched_tree.column("day", width=80, anchor="w")
+    sched_tree.column("start", width=80, anchor="center")
+    sched_tree.column("end", width=80, anchor="center")
+    sched_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    sched_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def refresh_schedule_tree() -> None:
+        snap = killer.snapshot()
+        schedule = snap["config"].get("schedule", {}) or {}
+        sel = sched_tree.selection()
+        sel_iid = sel[0] if sel else None
+
+        sched_tree.delete(*sched_tree.get_children())
+        for day_key in DAY_KEYS:
+            windows = schedule.get(day_key, []) or []
+            for i, w in enumerate(windows):
+                iid = f"{day_key}:{i}"
+                sched_tree.insert(
+                    "", "end",
+                    iid=iid,
+                    values=(DAY_NAMES[day_key], w.get("start", ""), w.get("end", "")),
+                )
+        if sel_iid and sched_tree.exists(sel_iid):
+            sched_tree.selection_set(sel_iid)
+
+    def _resolve_selected_window() -> tuple[str, int] | None:
+        sel = sched_tree.selection()
+        if not sel:
+            return None
+        iid = sel[0]
+        if ":" not in iid:
+            return None
+        day_key, idx_str = iid.split(":", 1)
+        try:
+            return day_key, int(idx_str)
+        except ValueError:
+            return None
+
+    def add_window() -> None:
+        def on_save(day_key: str, start: str, end: str) -> None:
+            snap = killer.snapshot()
+            cfg = json.loads(json.dumps(snap["config"]))
+            cfg.setdefault("schedule", {}).setdefault(day_key, []).append({
+                "start": start, "end": end,
+            })
+            cfg["schedule"][day_key].sort(key=lambda w: w.get("start", ""))
+            save_config(cfg)
+
+        ScheduleWindowEditor(root, on_save=on_save)
+
+    def edit_window() -> None:
+        resolved = _resolve_selected_window()
+        if resolved is None:
+            return
+        day_key, idx = resolved
+        snap = killer.snapshot()
+        cfg = snap["config"]
+        windows = cfg.get("schedule", {}).get(day_key, []) or []
+        if idx >= len(windows):
+            return
+        w = windows[idx]
+
+        def on_save(new_day: str, start: str, end: str) -> None:
+            snap2 = killer.snapshot()
+            cfg2 = json.loads(json.dumps(snap2["config"]))
+            old = cfg2.get("schedule", {}).get(day_key, []) or []
+            cfg2.setdefault("schedule", {})[day_key] = [
+                x for i, x in enumerate(old) if i != idx
+            ]
+            cfg2["schedule"].setdefault(new_day, []).append({"start": start, "end": end})
+            cfg2["schedule"][new_day].sort(key=lambda w: w.get("start", ""))
+            save_config(cfg2)
+
+        ScheduleWindowEditor(
+            root, on_save=on_save,
+            day=day_key, start=w.get("start"), end=w.get("end"),
+            title="Edit schedule window",
+        )
+
+    def remove_window() -> None:
+        resolved = _resolve_selected_window()
+        if resolved is None:
+            return
+        day_key, idx = resolved
+        snap = killer.snapshot()
+        cfg = json.loads(json.dumps(snap["config"]))
+        windows = cfg.get("schedule", {}).get(day_key, []) or []
+        if idx < len(windows):
+            cfg["schedule"][day_key] = [
+                x for i, x in enumerate(windows) if i != idx
+            ]
+            save_config(cfg)
+
+    sched_tree.bind("<Double-Button-1>", lambda e: edit_window())
+
+    sched_btns = ttk.Frame(schedule_tab)
+    sched_btns.pack(fill=tk.X)
+    ttk.Button(sched_btns, text="Add window…", command=add_window).pack(side=tk.LEFT)
+    ttk.Button(sched_btns, text="Edit selected…", command=edit_window).pack(side=tk.LEFT, padx=8)
+    ttk.Button(sched_btns, text="Remove selected", command=remove_window).pack(side=tk.LEFT)
+
     # ===== Settings tab =====
     settings_tab = ttk.Frame(notebook, padding=12)
     notebook.add(settings_tab, text="Settings")
@@ -1047,6 +1279,7 @@ def main() -> None:
         )
 
         refresh_apps_list()
+        refresh_schedule_tree()
 
         # Reload settings from config only when no spinbox has focus,
         # so an external edit propagates without trampling user input.
