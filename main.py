@@ -68,7 +68,10 @@ DEFAULT_CONFIG: dict = {
 DEFAULT_STATE: dict = {
     "currentBreak": None,
     "lastBreakEndedAt": None,
+    "editUnlockUntil": None,
 }
+
+EDIT_UNLOCK_MINUTES = 5
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +447,38 @@ class KillerThread(threading.Thread):
 
     def reset_break_state(self) -> None:
         with self._lock:
-            self._state = {"currentBreak": None, "lastBreakEndedAt": None}
+            self._state = {
+                "currentBreak": None,
+                "lastBreakEndedAt": None,
+                "editUnlockUntil": None,
+            }
+            save_state(self._state)
+
+    # -- edit lock (Phase 7) --
+
+    def is_edit_locked(self) -> bool:
+        """True if config edits should be gated by a word challenge.
+
+        Edits are locked when a schedule window is active, and *neither*
+        an allowance break nor an edit-unlock grace window is in effect.
+        (A break already cost a challenge — let it cover edits too.)
+        """
+        if self._active_window is None:
+            return False
+        if self.is_break_active():
+            return False
+        return self.edit_unlock_remaining_seconds() <= 0
+
+    def edit_unlock_remaining_seconds(self) -> float:
+        edit_until = _parse_iso(self._state.get("editUnlockUntil"))
+        if edit_until is None:
+            return 0.0
+        return max(0.0, (edit_until - datetime.now()).total_seconds())
+
+    def start_edit_unlock(self, duration_minutes: float = EDIT_UNLOCK_MINUTES) -> None:
+        with self._lock:
+            ends = datetime.now() + timedelta(minutes=duration_minutes)
+            self._state["editUnlockUntil"] = ends.isoformat()
             save_state(self._state)
 
     # -- main loop --
@@ -906,14 +940,22 @@ def main() -> None:
         side=tk.LEFT, padx=12
     )
 
+    def _challenge_word_count() -> int:
+        n = int(killer._settings().get("challengeWordCount", 50))
+        return max(1, min(n, len(wordlist)))
+
     def open_challenge() -> None:
         ok, _reason = killer.can_take_break()
         if not ok:
             return
-        word_count = int(killer._settings().get("challengeWordCount", 50))
-        word_count = max(1, min(word_count, len(wordlist)))
-        words = random.sample(wordlist, word_count)
+        words = random.sample(wordlist, _challenge_word_count())
         ChallengeModal(root, words, on_complete=killer.start_break)
+
+    def open_edit_unlock_challenge() -> None:
+        if not killer.is_edit_locked():
+            return
+        words = random.sample(wordlist, _challenge_word_count())
+        ChallengeModal(root, words, on_complete=killer.start_edit_unlock)
 
     break_btn.config(command=open_challenge)
 
@@ -969,6 +1011,19 @@ def main() -> None:
               text="These process names are killed during scheduled block windows.",
               ).pack(anchor="w")
 
+    # Edit-lock banner (Phase 7) — packed/forgotten based on is_edit_locked()
+    apps_lock_banner = tk.Frame(apps_tab, bg="#fff3cd")
+    apps_lock_label = tk.Label(
+        apps_lock_banner, bg="#fff3cd", fg="#664d03",
+        text="Schedule frozen during active block.", anchor="w",
+    )
+    apps_lock_label.pack(side=tk.LEFT, padx=8, pady=6)
+    apps_unlock_btn = ttk.Button(
+        apps_lock_banner, text="Unlock to edit", command=open_edit_unlock_challenge,
+    )
+    apps_unlock_btn.pack(side=tk.RIGHT, padx=8, pady=6)
+    # Note: not packed initially — refresh() shows/hides it.
+
     apps_frame = ttk.Frame(apps_tab)
     apps_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 8))
     apps_scroll = ttk.Scrollbar(apps_frame)
@@ -1022,10 +1077,10 @@ def main() -> None:
 
     apps_btns = ttk.Frame(apps_tab)
     apps_btns.pack(fill=tk.X)
-    ttk.Button(apps_btns, text="Add…", command=add_app_via_picker).pack(side=tk.LEFT)
-    ttk.Button(apps_btns, text="Remove selected", command=remove_selected_app).pack(
-        side=tk.LEFT, padx=8
-    )
+    apps_add_btn = ttk.Button(apps_btns, text="Add…", command=add_app_via_picker)
+    apps_add_btn.pack(side=tk.LEFT)
+    apps_remove_btn = ttk.Button(apps_btns, text="Remove selected", command=remove_selected_app)
+    apps_remove_btn.pack(side=tk.LEFT, padx=8)
 
     # ===== Schedule tab =====
     schedule_tab = ttk.Frame(notebook, padding=12)
@@ -1035,6 +1090,17 @@ def main() -> None:
         schedule_tab,
         text="Time windows during which blocked apps are killed (local 24h time).",
     ).pack(anchor="w")
+
+    sched_lock_banner = tk.Frame(schedule_tab, bg="#fff3cd")
+    sched_lock_label = tk.Label(
+        sched_lock_banner, bg="#fff3cd", fg="#664d03",
+        text="Schedule frozen during active block.", anchor="w",
+    )
+    sched_lock_label.pack(side=tk.LEFT, padx=8, pady=6)
+    sched_unlock_btn = ttk.Button(
+        sched_lock_banner, text="Unlock to edit", command=open_edit_unlock_challenge,
+    )
+    sched_unlock_btn.pack(side=tk.RIGHT, padx=8, pady=6)
 
     sched_frame = ttk.Frame(schedule_tab)
     sched_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 8))
@@ -1144,13 +1210,21 @@ def main() -> None:
             ]
             save_config(cfg)
 
-    sched_tree.bind("<Double-Button-1>", lambda e: edit_window())
+    def _maybe_edit_window(_e=None) -> None:
+        if killer.is_edit_locked():
+            return
+        edit_window()
+
+    sched_tree.bind("<Double-Button-1>", _maybe_edit_window)
 
     sched_btns = ttk.Frame(schedule_tab)
     sched_btns.pack(fill=tk.X)
-    ttk.Button(sched_btns, text="Add window…", command=add_window).pack(side=tk.LEFT)
-    ttk.Button(sched_btns, text="Edit selected…", command=edit_window).pack(side=tk.LEFT, padx=8)
-    ttk.Button(sched_btns, text="Remove selected", command=remove_window).pack(side=tk.LEFT)
+    sched_add_btn = ttk.Button(sched_btns, text="Add window…", command=add_window)
+    sched_add_btn.pack(side=tk.LEFT)
+    sched_edit_btn = ttk.Button(sched_btns, text="Edit selected…", command=edit_window)
+    sched_edit_btn.pack(side=tk.LEFT, padx=8)
+    sched_remove_btn = ttk.Button(sched_btns, text="Remove selected", command=remove_window)
+    sched_remove_btn.pack(side=tk.LEFT)
 
     # ===== Settings tab =====
     settings_tab = ttk.Frame(notebook, padding=12)
@@ -1280,6 +1354,33 @@ def main() -> None:
 
         refresh_apps_list()
         refresh_schedule_tree()
+
+        # Edit lock
+        locked = killer.is_edit_locked()
+        edit_remaining = killer.edit_unlock_remaining_seconds()
+        apps_edit_buttons = [apps_add_btn, apps_remove_btn]
+        sched_edit_buttons = [sched_add_btn, sched_edit_btn, sched_remove_btn]
+        if locked:
+            if not apps_lock_banner.winfo_ismapped():
+                apps_lock_banner.pack(fill=tk.X, pady=(8, 0), after=apps_tab.winfo_children()[0])
+            if not sched_lock_banner.winfo_ismapped():
+                sched_lock_banner.pack(fill=tk.X, pady=(8, 0), after=schedule_tab.winfo_children()[0])
+            for b in apps_edit_buttons + sched_edit_buttons:
+                b.state(["disabled"])
+        else:
+            if apps_lock_banner.winfo_ismapped():
+                apps_lock_banner.pack_forget()
+            if sched_lock_banner.winfo_ismapped():
+                sched_lock_banner.pack_forget()
+            for b in apps_edit_buttons + sched_edit_buttons:
+                b.state(["!disabled"])
+            if edit_remaining > 0:
+                rem_label = f"Edit access: {_format_remaining(edit_remaining)} remaining"
+                apps_lock_label.config(text=rem_label)
+                sched_lock_label.config(text=rem_label)
+            else:
+                apps_lock_label.config(text="Schedule frozen during active block.")
+                sched_lock_label.config(text="Schedule frozen during active block.")
 
         # Reload settings from config only when no spinbox has focus,
         # so an external edit propagates without trampling user input.
