@@ -8,12 +8,12 @@ REM This script's job is to keep you on the latest code. If the download
 REM fails, it errors out loudly rather than silently running stale code.
 REM
 REM Order of acquisition:
-REM   1. If a manually-downloaded zip exists at %USERPROFILE%\Downloads\
-REM      app-blocker-main.zip, use it (then delete it).
-REM   2. Otherwise try BITS, WebClient, IWR, curl in that order. Each takes
-REM      a different path through Windows networking - one usually gets
-REM      through corp proxies that require NTLM/Negotiate auth.
-REM   3. If all fail: error out, open the URL in browser, and tell the user
+REM   1. Try BITS, WebClient, IWR, curl in that order. Each takes a different
+REM      path through Windows networking - one usually gets through corp
+REM      proxies that require NTLM/Negotiate auth.
+REM   2. If all auto methods fail AND a freshly-placed manual zip exists at
+REM      %USERPROFILE%\Downloads\app-blocker-main.zip, use it (then delete).
+REM   3. Otherwise: error out, open the URL in browser, and tell the user
 REM      where to drop the zip for next run.
 REM
 REM To run the last installed version WITHOUT updating, just run:
@@ -42,15 +42,7 @@ if "!PY!"=="" (
 echo   using: !PY!
 
 echo.
-echo [2/4] Acquiring source...
-
-REM Use a manually-downloaded zip from Downloads if present
-if exist "%DOWNLOADS_ZIP%" (
-    echo   found manual download at %DOWNLOADS_ZIP%
-    copy /Y "%DOWNLOADS_ZIP%" "%ZIP_PATH%" >nul
-    del "%DOWNLOADS_ZIP%" >nul 2>&1
-    goto :extract
-)
+echo [2/4] Downloading from GitHub...
 
 if exist "%ZIP_PATH%" del "%ZIP_PATH%" >nul 2>&1
 
@@ -80,7 +72,16 @@ if not errorlevel 1 (
     if not errorlevel 1 if exist "%ZIP_PATH%" (echo   ok ^(curl/ntlm^) & goto :extract)
 )
 
-REM All auto methods failed - error loudly. Do NOT silently run stale code.
+REM All auto methods failed. Last resort: a freshly placed manual zip in Downloads.
+if exist "%DOWNLOADS_ZIP%" (
+    echo.
+    echo   auto-download failed; using manual zip at %DOWNLOADS_ZIP%
+    copy /Y "%DOWNLOADS_ZIP%" "%ZIP_PATH%" >nul
+    del "%DOWNLOADS_ZIP%" >nul 2>&1
+    goto :extract
+)
+
+REM Truly stuck - error loudly. Do NOT silently run stale code.
 echo.
 echo ERROR: Could not download latest from GitHub.
 echo The corp proxy denied the request.
@@ -90,6 +91,7 @@ echo   - Open https://github.com/z3nabi/app-blocker in your browser first to
 echo     authenticate to the proxy, then re-run this script.
 echo   - Or download the zip manually: %ZIP_URL%
 echo     Save to %USERPROFILE%\Downloads\app-blocker-main.zip and re-run.
+echo     (Make sure to delete any old copy first.)
 echo.
 if exist "%INSTALL_DIR%\main.py" (
     echo To run the LAST INSTALLED version without updating:
