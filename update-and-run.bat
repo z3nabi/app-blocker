@@ -2,16 +2,22 @@
 setlocal enabledelayedexpansion
 
 REM ---------------------------------------------------------------------------
-REM run.bat - download (or use cached) latest app-blocker, then run it.
+REM update-and-run.bat - pull latest app-blocker from GitHub and run it.
 REM
-REM Behavior:
-REM   1. Try several auto-download methods (BITS, WebClient, IWR, curl) to
-REM      handle corp proxies (NTLM/Negotiate via Windows credentials).
-REM   2. If a manually-downloaded zip exists at %USERPROFILE%\Downloads\
-REM      app-blocker-main.zip, use that.
-REM   3. If all downloads fail but a previous install exists, run that.
-REM   4. As a last resort, open the GitHub URL in the browser and instruct
-REM      the user to download manually.
+REM This script's job is to keep you on the latest code. If the download
+REM fails, it errors out loudly rather than silently running stale code.
+REM
+REM Order of acquisition:
+REM   1. If a manually-downloaded zip exists at %USERPROFILE%\Downloads\
+REM      app-blocker-main.zip, use it (then delete it).
+REM   2. Otherwise try BITS, WebClient, IWR, curl in that order. Each takes
+REM      a different path through Windows networking - one usually gets
+REM      through corp proxies that require NTLM/Negotiate auth.
+REM   3. If all fail: error out, open the URL in browser, and tell the user
+REM      where to drop the zip for next run.
+REM
+REM To run the last installed version WITHOUT updating, just run:
+REM   python "%USERPROFILE%\app-blocker\main.py"
 REM ---------------------------------------------------------------------------
 
 set "INSTALL_DIR=%USERPROFILE%\app-blocker"
@@ -74,22 +80,23 @@ if not errorlevel 1 (
     if not errorlevel 1 if exist "%ZIP_PATH%" (echo   ok ^(curl/ntlm^) & goto :extract)
 )
 
-REM All auto methods failed
-echo   all auto-download methods failed.
+REM All auto methods failed - error loudly. Do NOT silently run stale code.
 echo.
-
+echo ERROR: Could not download latest from GitHub.
+echo The corp proxy denied the request.
+echo.
+echo TRY:
+echo   - Open https://github.com/z3nabi/app-blocker in your browser first to
+echo     authenticate to the proxy, then re-run this script.
+echo   - Or download the zip manually: %ZIP_URL%
+echo     Save to %USERPROFILE%\Downloads\app-blocker-main.zip and re-run.
+echo.
 if exist "%INSTALL_DIR%\main.py" (
-    echo [3/4] Falling back to last installed version at %INSTALL_DIR%
-    goto :run
+    echo To run the LAST INSTALLED version without updating:
+    echo   cd /d "%INSTALL_DIR%"
+    echo   !PY! main.py
+    echo.
 )
-
-echo Auto-download failed and no local install exists.
-echo.
-echo MANUAL FALLBACK:
-echo   1. Your browser is opening the download URL.
-echo   2. Save the file to your Downloads folder ^(default name is fine^).
-echo   3. Re-run this script - it will pick up the zip automatically.
-echo.
 start "" "%ZIP_URL%"
 pause
 exit /b 1
@@ -102,17 +109,12 @@ if exist "%INSTALL_DIR%" rmdir /S /Q "%INSTALL_DIR%"
 powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; Expand-Archive -Path '%ZIP_PATH%' -DestinationPath '%EXTRACT_TMP%' -Force"
 if errorlevel 1 (
     echo   extract failed.
-    if exist "%INSTALL_DIR%\main.py" (
-        echo   falling back to last install.
-        goto :run
-    )
     pause & exit /b 1
 )
 move "%EXTRACT_TMP%\app-blocker-main" "%INSTALL_DIR%" >nul
 rmdir /S /Q "%EXTRACT_TMP%" 2>nul
 del "%ZIP_PATH%" 2>nul
 
-:run
 echo.
 echo [4/4] Starting app-blocker...
 echo (close the app window to exit)

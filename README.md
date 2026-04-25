@@ -14,17 +14,21 @@ Python-script-based implementation that runs via the already-allowlisted `python
 
 Requires Python 3.9+. No dependencies needed.
 
-### One-shot launcher (downloads latest, then runs)
+### Update-and-run launcher
 
-**Windows:** save [run.bat](https://raw.githubusercontent.com/z3nabi/app-blocker/main/run.bat) anywhere (e.g. Desktop). Double-click to launch. Each run pulls the latest from GitHub.
+Each launch pulls the latest from GitHub before running. If the download fails (e.g. corp proxy), it errors out loudly — no silent fallback to stale code.
 
-**macOS/Linux:** save [run.sh](https://raw.githubusercontent.com/z3nabi/app-blocker/main/run.sh), `chmod +x run.sh`, then `./run.sh`.
+**Windows:** save [update-and-run.bat](https://raw.githubusercontent.com/z3nabi/app-blocker/main/update-and-run.bat) anywhere (e.g. Desktop), double-click to launch.
 
-### Or run from a checkout
+**macOS/Linux:** save [update-and-run.sh](https://raw.githubusercontent.com/z3nabi/app-blocker/main/update-and-run.sh), `chmod +x update-and-run.sh`, then `./update-and-run.sh`.
+
+### Run last install (no update)
+
+After the launcher has run at least once, the code lives at `~/app-blocker/` (Mac) or `%USERPROFILE%\app-blocker\` (Windows). Run it directly to skip the download:
 
 ```
-python main.py     # Windows
-python3 main.py    # macOS
+python "%USERPROFILE%\app-blocker\main.py"     # Windows
+python3 "$HOME/app-blocker/main.py"            # macOS
 ```
 
 ## Optional speedup
