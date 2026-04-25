@@ -1206,7 +1206,6 @@ def main() -> None:
         ("today", "Today"),
         ("schedule", "Schedule"),
         ("blocks", "Block lists"),
-        ("allowance", "Allowance"),
         ("settings", "Settings"),
     ]
     nav_widgets: dict[str, dict] = {}
@@ -1229,14 +1228,6 @@ def main() -> None:
             fg = INK if active else INK2
             font = F("sans", 11, "bold" if active else "normal")
             w["label"].config(bg=bg, fg=fg, font=font)
-
-    def _set_nav_badge(key: str, text: str) -> None:
-        info = nav_widgets[key]
-        base = info["base_text"]
-        if text:
-            info["label"].config(text=f"{base}   · {text}")
-        else:
-            info["label"].config(text=base)
 
     for key, label in nav_items:
         # Single-widget row: one Label that fills the whole sidebar width.
@@ -1330,16 +1321,43 @@ def main() -> None:
         font=F("sans", 9, "bold"),
     ).pack(anchor="e", pady=(2, 0))
 
-    action_row = tk.Frame(today_inner, bg=WHITE)
-    action_row.pack(fill=tk.X, pady=(0, 24))
+    al_card = tk.Frame(
+        today_inner, bg=PAPER,
+        highlightthickness=1, highlightbackground=LINE,
+    )
+    al_card.pack(fill=tk.X, pady=(0, 22))
+    al_pad = tk.Frame(al_card, bg=PAPER)
+    al_pad.pack(fill=tk.X, padx=28, pady=22)
+
+    al_eyebrow_var = tk.StringVar(value="ALLOWANCE BREAK")
+    tk.Label(
+        al_pad, textvariable=al_eyebrow_var, bg=PAPER, fg=INK3,
+        font=F("sans", 9, "bold"), anchor="w",
+    ).pack(anchor="w")
+
+    al_status_var = tk.StringVar(value="")
+    tk.Label(
+        al_pad, textvariable=al_status_var, bg=PAPER, fg=INK,
+        font=F("serif", 18), anchor="w",
+    ).pack(anchor="w", pady=(4, 4))
+
+    al_status_sub_var = tk.StringVar(value="")
+    tk.Label(
+        al_pad, textvariable=al_status_sub_var, bg=PAPER, fg=INK2,
+        font=F("sans", 11), anchor="w",
+        wraplength=820, justify="left",
+    ).pack(anchor="w", pady=(0, 14))
+
+    al_btn_row = tk.Frame(al_pad, bg=PAPER)
+    al_btn_row.pack(fill=tk.X)
     break_btn = make_button(
-        action_row, "Take allowance break", open_challenge, primary=True,
+        al_btn_row, "Begin allowance break", open_challenge, primary=True,
     )
     break_btn.pack(side=tk.LEFT)
-    break_status_var = tk.StringVar(value="")
+    al_meta_var = tk.StringVar(value="")
     tk.Label(
-        action_row, textvariable=break_status_var, bg=WHITE, fg=INK2,
-        font=F("sans", 10, "italic"), padx=14,
+        al_btn_row, textvariable=al_meta_var, bg=PAPER, fg=INK3,
+        font=F("mono", 10), padx=14,
     ).pack(side=tk.LEFT)
 
     stats_grid = tk.Frame(
@@ -1767,90 +1785,6 @@ def main() -> None:
     apps_remove_btn.pack(side=tk.LEFT)
 
     # =========================================================================
-    # Allowance page
-    # =========================================================================
-    allowance_page = tk.Frame(content, bg=WHITE)
-    pages["allowance"] = allowance_page
-    al_inner = tk.Frame(allowance_page, bg=WHITE)
-    al_inner.pack(fill=tk.BOTH, expand=True, padx=48, pady=36)
-
-    al_eyebrow_var = tk.StringVar(value="ALLOWANCE BREAK")
-    tk.Label(
-        al_inner, textvariable=al_eyebrow_var, bg=WHITE, fg=INK3,
-        font=F("sans", 9, "bold"), anchor="w",
-    ).pack(anchor="w")
-    tk.Label(
-        al_inner, text="Earn a break.", bg=WHITE, fg=INK,
-        font=F("serif", 28), anchor="w",
-    ).pack(anchor="w", pady=(4, 14))
-
-    al_body_var = tk.StringVar(
-        value="Type a sequence of words. Letting up costs you the run.",
-    )
-    tk.Label(
-        al_inner, textvariable=al_body_var, bg=WHITE, fg=INK2,
-        font=F("sans", 12), wraplength=720, justify="left", anchor="w",
-    ).pack(anchor="w", pady=(0, 22))
-
-    al_state_card = tk.Frame(
-        al_inner, bg=PAPER,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    al_state_card.pack(fill=tk.X, pady=(0, 14))
-    al_state_pad = tk.Frame(al_state_card, bg=PAPER)
-    al_state_pad.pack(fill=tk.X, padx=28, pady=22)
-    al_status_var = tk.StringVar(value="")
-    tk.Label(
-        al_state_pad, textvariable=al_status_var, bg=PAPER, fg=INK,
-        font=F("serif", 18), anchor="w",
-    ).pack(anchor="w")
-    al_status_sub_var = tk.StringVar(value="")
-    tk.Label(
-        al_state_pad, textvariable=al_status_sub_var, bg=PAPER, fg=INK2,
-        font=F("sans", 11), anchor="w", wraplength=700, justify="left",
-    ).pack(anchor="w", pady=(4, 14))
-    al_begin_btn = make_button(
-        al_state_pad, "Begin allowance break", open_challenge, primary=True,
-    )
-    al_begin_btn.pack(anchor="w")
-
-    al_info_grid = tk.Frame(
-        al_inner, bg=LINE,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    al_info_grid.pack(fill=tk.X, pady=(0, 14))
-    for i in range(3):
-        al_info_grid.columnconfigure(i, weight=1, uniform="al")
-    al_words_var = tk.StringVar(value="—")
-    al_break_var = tk.StringVar(value="—")
-    al_cool_var = tk.StringVar(value="—")
-
-    def _al_cell(col, label, val_var):
-        c = tk.Frame(al_info_grid, bg=WHITE)
-        c.grid(
-            row=0, column=col, sticky="nsew",
-            padx=(0 if col == 0 else 1, 0),
-        )
-        tk.Label(
-            c, text=label, bg=WHITE, fg=INK3,
-            font=F("sans", 9, "bold"), anchor="w",
-        ).pack(anchor="w", padx=20, pady=(16, 4))
-        tk.Label(
-            c, textvariable=val_var, bg=WHITE, fg=INK,
-            font=F("serif", 22), anchor="w",
-        ).pack(anchor="w", padx=20, pady=(0, 16))
-
-    _al_cell(0, "WORDS TO TYPE", al_words_var)
-    _al_cell(1, "BREAK LENGTH", al_break_var)
-    _al_cell(2, "COOLDOWN", al_cool_var)
-
-    al_foot_var = tk.StringVar(value="")
-    tk.Label(
-        al_inner, textvariable=al_foot_var, bg=WHITE, fg=INK3,
-        font=F("sans", 10, "italic"), anchor="w",
-    ).pack(anchor="w", pady=(4, 0))
-
-    # =========================================================================
     # Settings page
     # =========================================================================
     settings_page = tk.Frame(content, bg=WHITE)
@@ -2041,21 +1975,33 @@ def main() -> None:
                 cfg.get("schedule", {}), now))
             hero_time_var.set("—")
 
+        s_settings = cfg.get("settings", {}) or {}
+        break_min = int(s_settings.get("breakDurationMinutes", 10))
+        word_count = int(s_settings.get("challengeWordCount", 50))
+        cool_min = int(s_settings.get("cooldownMinutes", 30))
+
         ok, reason = killer.can_take_break()
-        if ok:
+        if ends_at:
+            break_btn.config(state=tk.DISABLED)
+            al_status_var.set("Break in progress.")
+            al_status_sub_var.set(
+                f"Ends at {ends_at.strftime('%H:%M')}.")
+        elif ok:
             break_btn.config(state=tk.NORMAL)
-            break_status_var.set(
-                "Ready — completing the challenge starts a break.")
-            al_begin_btn.config(state=tk.NORMAL)
             al_status_var.set("Ready when you are.")
             al_status_sub_var.set(
-                "Type the words to begin a 10-minute break.")
+                f"Type {word_count} words to start a "
+                f"{break_min}-minute break.")
         else:
             break_btn.config(state=tk.DISABLED)
-            break_status_var.set(reason)
-            al_begin_btn.config(state=tk.DISABLED)
             al_status_var.set("Not available right now.")
             al_status_sub_var.set(reason)
+
+        al_eyebrow_var.set(f"ALLOWANCE BREAK · {break_min} MINUTES")
+        al_meta_var.set(
+            f"{break_min} min · {word_count} words · "
+            f"{cool_min} min cooldown"
+        )
 
         if window:
             sb_label_var.set("Deep work")
@@ -2064,15 +2010,6 @@ def main() -> None:
             sb_label_var.set("None")
             sb_sub_var.set(_summarize_schedule_today(
                 cfg.get("schedule", {}), now))
-
-        if ends_at:
-            _set_nav_badge("allowance", "break")
-        elif ok:
-            _set_nav_badge("allowance", "ready")
-        elif window:
-            _set_nav_badge("allowance", "locked")
-        else:
-            _set_nav_badge("allowance", "")
 
         kills = snap["kills"]
         last_tick = snap["last_tick_at"]
@@ -2125,24 +2062,6 @@ def main() -> None:
             f"Config: {config_path()}\n"
             f"State:  {state_path()}"
         )
-
-        s_settings = cfg.get("settings", {}) or {}
-        al_words_var.set(str(int(s_settings.get("challengeWordCount", 50))))
-        al_break_var.set(
-            f"{int(s_settings.get('breakDurationMinutes', 10))} min")
-        al_cool_var.set(
-            f"{int(s_settings.get('cooldownMinutes', 30))} min")
-        al_eyebrow_var.set(
-            f"ALLOWANCE BREAK · "
-            f"{int(s_settings.get('breakDurationMinutes', 10))} MINUTES"
-        )
-        if ends_at:
-            al_foot_var.set("Break in progress.")
-        elif cd > 0:
-            al_foot_var.set(
-                "Cooldown after each break to prevent rapid re-entry.")
-        else:
-            al_foot_var.set("")
 
         refresh_apps_list()
         refresh_schedule_tree()
