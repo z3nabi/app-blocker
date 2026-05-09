@@ -8,7 +8,7 @@ application object directly into the function under test.
 import json
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 import outlook_calendar
@@ -209,6 +209,121 @@ class TestCurrentDeepWorkEvent(unittest.TestCase):
         result = outlook_calendar.current_deep_work_event(datetime(2026, 5, 9, 10, 30))
         self.assertIsNotNone(result)
         self.assertIn(result["subject"], ("A", "B"))
+
+
+from unittest.mock import MagicMock, PropertyMock
+
+
+class TestFetchTodayEventsFromOutlook(unittest.TestCase):
+    def _make_outlook(self, items):
+        """Build a mock Outlook Application object whose calendar returns `items`."""
+        outlook = MagicMock()
+        ns = MagicMock()
+        outlook.GetNamespace.return_value = ns
+        calendar = MagicMock()
+        ns.GetDefaultFolder.return_value = calendar
+
+        items_collection = MagicMock()
+        calendar.Items = items_collection
+        # Restrict returns a new collection. Use the same mock for simplicity —
+        # the test cares about iteration semantics, not the Restrict call itself.
+        restricted = MagicMock()
+        items_collection.Restrict.return_value = restricted
+
+        # Simulate GetFirst/GetNext iteration over the supplied items.
+        seq = list(items)
+        idx = {"i": 0}
+
+        def get_first():
+            idx["i"] = 0
+            return seq[0] if seq else None
+
+        def get_next():
+            idx["i"] += 1
+            return seq[idx["i"]] if idx["i"] < len(seq) else None
+
+        restricted.GetFirst.side_effect = get_first
+        restricted.GetNext.side_effect = get_next
+        return outlook
+
+    def _make_appointment(self, *, subject, start, end, categories, all_day=False, klass=26):
+        """Build a mock Outlook AppointmentItem."""
+        item = MagicMock()
+        item.Class = klass
+        item.Subject = subject
+        item.Start = start  # datetime; real COM exposes pywintypes.Time but MagicMock is fine here
+        item.End = end
+        item.Categories = categories
+        item.AllDayEvent = all_day
+        return item
+
+    def test_returns_only_deep_work_appointments(self):
+        outlook = self._make_outlook([
+            self._make_appointment(
+                subject="Focus", start=datetime(2026, 5, 9, 9, 0),
+                end=datetime(2026, 5, 9, 11, 0), categories="Deep Work"),
+            self._make_appointment(
+                subject="Lunch", start=datetime(2026, 5, 9, 12, 0),
+                end=datetime(2026, 5, 9, 13, 0), categories="Personal"),
+            self._make_appointment(
+                subject="Standup", start=datetime(2026, 5, 9, 14, 0),
+                end=datetime(2026, 5, 9, 14, 30), categories=""),
+        ])
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["subject"], "Focus")
+        self.assertEqual(events[0]["start"], "2026-05-09T09:00:00")
+        self.assertEqual(events[0]["end"], "2026-05-09T11:00:00")
+        self.assertFalse(events[0]["isAllDay"])
+
+    def test_skips_non_appointment_class(self):
+        outlook = self._make_outlook([
+            self._make_appointment(
+                subject="A meeting request, not an appointment",
+                start=datetime(2026, 5, 9, 9, 0),
+                end=datetime(2026, 5, 9, 11, 0),
+                categories="Deep Work",
+                klass=53),  # MeetingItem, not AppointmentItem (26)
+        ])
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work")
+        self.assertEqual(events, [])
+
+    def test_corrupted_item_skipped_not_raised(self):
+        bad_item = MagicMock()
+        type(bad_item).Class = PropertyMock(side_effect=Exception("can't read"))
+        good_item = self._make_appointment(
+            subject="Focus", start=datetime(2026, 5, 9, 9, 0),
+            end=datetime(2026, 5, 9, 11, 0), categories="Deep Work")
+        outlook = self._make_outlook([bad_item, good_item])
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work")
+        # Bad item skipped, good item kept.
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["subject"], "Focus")
+
+    def test_calls_outlook_in_correct_order(self):
+        outlook = self._make_outlook([])
+        outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work")
+        # Spec: Sort "[Start]" → IncludeRecurrences = True → Restrict(...).
+        items_collection = outlook.GetNamespace.return_value.GetDefaultFolder.return_value.Items
+        items_collection.Sort.assert_called_once_with("[Start]")
+        # IncludeRecurrences set via attribute assignment — verify property was set.
+        self.assertEqual(items_collection.IncludeRecurrences, True)
+        items_collection.Restrict.assert_called_once()
+
+    def test_all_day_event_marked(self):
+        outlook = self._make_outlook([
+            self._make_appointment(
+                subject="Focus day", start=datetime(2026, 5, 9, 0, 0),
+                end=datetime(2026, 5, 10, 0, 0), categories="Deep Work", all_day=True),
+        ])
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work")
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["isAllDay"])
 
 
 if __name__ == "__main__":

@@ -139,3 +139,51 @@ def _set_cache_for_tests(cache: dict) -> None:
     global _cache
     with _cache_lock:
         _cache = dict(cache, events=[dict(ev) for ev in cache.get("events", [])])
+
+
+def _fetch_today_events_from_outlook(outlook_app, today: date, category: str) -> list[dict]:
+    """Read today's calendar events from a running Outlook instance.
+
+    `outlook_app` is the Outlook Application COM object — passed in so this
+    function can be unit-tested with a mock without importing win32com.
+
+    Returns a list of plain-dict events (no COM references); callers can
+    cache them, persist them, etc., without keeping Outlook open.
+
+    Internal exceptions while reading individual items are swallowed —
+    a single corrupted item must not abort the whole sync.
+    """
+    namespace = outlook_app.GetNamespace("MAPI")
+    calendar = namespace.GetDefaultFolder(9)  # 9 = olFolderCalendar
+    items = calendar.Items
+
+    # Order matters: Sort BEFORE setting IncludeRecurrences = True; both BEFORE Restrict.
+    # This is what makes recurring events expand into individual instances inside the date filter.
+    items.Sort("[Start]")
+    items.IncludeRecurrences = True
+
+    # Outlook's Restrict date format is locale-sensitive. en-US format works on the
+    # work laptop; if the date format ever bites, this is the line to revisit.
+    start_str = today.strftime("%m/%d/%Y 00:00")
+    end_str = (today + timedelta(days=1)).strftime("%m/%d/%Y 00:00")
+    restricted = items.Restrict(f"[Start] >= '{start_str}' AND [Start] < '{end_str}'")
+
+    out: list[dict] = []
+    item = restricted.GetFirst()
+    while item is not None:
+        try:
+            if item.Class == 26:  # olAppointment
+                if _event_has_category(item.Categories, category):
+                    out.append({
+                        "start": item.Start.isoformat() if hasattr(item.Start, "isoformat")
+                                 else str(item.Start),
+                        "end": item.End.isoformat() if hasattr(item.End, "isoformat")
+                               else str(item.End),
+                        "subject": item.Subject or "",
+                        "isAllDay": bool(item.AllDayEvent),
+                    })
+        except Exception:
+            # Per spec — skip unreadable items, never abort the loop.
+            pass
+        item = restricted.GetNext()
+    return out
