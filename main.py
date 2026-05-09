@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import messagebox, ttk
 import outlook_calendar
+import tray
 
 
 TICK_INTERVAL = 1.0
@@ -1078,11 +1079,53 @@ def main() -> None:
         lightcolor=PAPER, darkcolor=PAPER,
     )
 
-    def on_close() -> None:
+    tray_icon: tray.TrayIcon | None = None
+
+    def _restore_window() -> None:
+        try:
+            root.deiconify()
+        except tk.TclError:
+            return
+        root.state("normal")
+        root.lift()
+        root.focus_force()
+
+    def _quit_app() -> None:
+        if tray_icon is not None:
+            tray_icon.stop()
         killer.stop()
-        root.destroy()
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
+
+    if tray.HAVE_WIN32 and sys.platform == "win32":
+        try:
+            tray_icon = tray.TrayIcon(
+                title="Stillwater · App Blocker",
+                on_show=lambda: root.after(0, _restore_window),
+                on_quit=lambda: root.after(0, _quit_app),
+            )
+            tray_icon.start()
+        except Exception:
+            tray_icon = None
+
+    def on_close() -> None:
+        if tray_icon is not None:
+            root.withdraw()
+        else:
+            _quit_app()
+
+    def on_unmap(event) -> None:
+        if event.widget is root and tray_icon is not None:
+            try:
+                if root.state() == "iconic":
+                    root.withdraw()
+            except tk.TclError:
+                pass
 
     root.protocol("WM_DELETE_WINDOW", on_close)
+    root.bind("<Unmap>", on_unmap)
 
     def make_button(parent, text, command, *, primary: bool = False) -> tk.Button:
         bg = INK if primary else WHITE
