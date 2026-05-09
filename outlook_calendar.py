@@ -18,6 +18,8 @@ would create a kill/relaunch loop.
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from datetime import datetime, date, time, timedelta
 from pathlib import Path
@@ -59,3 +61,36 @@ def _event_covers(event: dict, now: datetime) -> bool:
         return start <= now <= end
 
     return start <= now < end
+
+
+_EMPTY_CACHE = {
+    "lastSyncAt": None,
+    "lastSyncOk": False,
+    "lastSyncError": None,
+    "events": [],
+}
+
+
+def _load_cache(path: Path) -> dict:
+    """Load cache from disk; return empty cache on missing file or invalid JSON."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return dict(_EMPTY_CACHE, events=[])
+    # Defensive: if the file is missing keys, fall back to defaults.
+    return {
+        "lastSyncAt": data.get("lastSyncAt"),
+        "lastSyncOk": bool(data.get("lastSyncOk", False)),
+        "lastSyncError": data.get("lastSyncError"),
+        "events": list(data.get("events", [])),
+    }
+
+
+def _save_cache(path: Path, cache: dict) -> None:
+    """Atomically write cache to disk (write-temp-then-rename)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2)
+    os.replace(tmp, path)

@@ -5,8 +5,11 @@ import or call win32com; the COM-fetch test injects a mock Outlook
 application object directly into the function under test.
 """
 
+import json
+import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
 
 import outlook_calendar
 
@@ -89,6 +92,48 @@ class TestEventCovers(unittest.TestCase):
         # _event_covers must treat them as naive local times, not crash.
         ev = self._ev("2026-05-09T09:00:00+00:00", "2026-05-09T11:00:00+00:00")
         self.assertTrue(outlook_calendar._event_covers(ev, datetime(2026, 5, 9, 10, 0, 0)))
+
+
+class TestCacheIO(unittest.TestCase):
+    def test_load_missing_file_returns_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = outlook_calendar._load_cache(Path(d) / "missing.json")
+            self.assertEqual(cache["events"], [])
+            self.assertIsNone(cache["lastSyncAt"])
+            self.assertFalse(cache["lastSyncOk"])
+
+    def test_load_corrupt_file_returns_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "bad.json"
+            p.write_text("{not valid json")
+            cache = outlook_calendar._load_cache(p)
+            self.assertEqual(cache["events"], [])
+
+    def test_save_then_load_roundtrip(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "cache.json"
+            original = {
+                "lastSyncAt": "2026-05-09T08:30:00",
+                "lastSyncOk": True,
+                "lastSyncError": None,
+                "events": [
+                    {"start": "2026-05-09T09:00:00", "end": "2026-05-09T11:00:00",
+                     "subject": "Focus", "isAllDay": False},
+                ],
+            }
+            outlook_calendar._save_cache(p, original)
+            loaded = outlook_calendar._load_cache(p)
+            self.assertEqual(loaded, original)
+
+    def test_save_overwrites_existing(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "cache.json"
+            outlook_calendar._save_cache(p, {"lastSyncAt": "first", "lastSyncOk": True,
+                                             "lastSyncError": None, "events": []})
+            outlook_calendar._save_cache(p, {"lastSyncAt": "second", "lastSyncOk": True,
+                                             "lastSyncError": None, "events": []})
+            loaded = outlook_calendar._load_cache(p)
+            self.assertEqual(loaded["lastSyncAt"], "second")
 
 
 if __name__ == "__main__":
