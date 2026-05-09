@@ -60,6 +60,7 @@ DEFAULT_STATE: dict = {
     "currentBreak": None,
     "lastBreakEndedAt": None,
     "editUnlockUntil": None,
+    "manualFocus": None,
 }
 
 EDIT_UNLOCK_MINUTES = 5
@@ -361,6 +362,21 @@ def _parse_iso(s: str | None) -> datetime | None:
         return None
 
 
+def _pick_latest_window(a: dict | None, b: dict | None) -> dict | None:
+    """Choose the window that ends later. Used to merge calendar + manual focus."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    a_end = _parse_iso(a.get("end"))
+    b_end = _parse_iso(b.get("end"))
+    if a_end is None:
+        return b
+    if b_end is None:
+        return a
+    return a if a_end >= b_end else b
+
+
 class KillerThread(threading.Thread):
     def __init__(self) -> None:
         super().__init__(daemon=True)
@@ -467,6 +483,44 @@ class KillerThread(threading.Thread):
                 "currentBreak": None,
                 "lastBreakEndedAt": None,
                 "editUnlockUntil": None,
+                "manualFocus": None,
+            }
+            save_state(self._state)
+
+    # -- manual focus session --
+
+    def manual_focus_window(self) -> dict | None:
+        """Return the active manual focus session as a window dict, or None.
+
+        Lazily clears expired sessions from state. The returned shape matches
+        outlook_calendar.current_deep_work_event so the same downstream code
+        treats it as a blocking window.
+        """
+        with self._lock:
+            mf = self._state.get("manualFocus")
+            if not mf:
+                return None
+            ends_at = _parse_iso(mf.get("endsAt"))
+            started_at = _parse_iso(mf.get("startedAt"))
+            if ends_at is None or datetime.now() >= ends_at:
+                self._state["manualFocus"] = None
+                save_state(self._state)
+                return None
+            return {
+                "start": started_at.isoformat() if started_at else mf.get("startedAt"),
+                "end": ends_at.isoformat(),
+                "subject": "Focus session",
+                "source": "manual",
+            }
+
+    def start_manual_focus(self, minutes: float) -> None:
+        with self._lock:
+            now = datetime.now()
+            ends = now + timedelta(minutes=float(minutes))
+            self._state["manualFocus"] = {
+                "startedAt": now.isoformat(),
+                "endsAt": ends.isoformat(),
+                "minutes": float(minutes),
             }
             save_state(self._state)
 
@@ -507,7 +561,9 @@ class KillerThread(threading.Thread):
             self._reload_config()
 
             now = datetime.now()
-            window = outlook_calendar.current_deep_work_event(now)
+            calendar_window = outlook_calendar.current_deep_work_event(now)
+            manual_window = self.manual_focus_window()
+            window = _pick_latest_window(calendar_window, manual_window)
 
             # Lazily expire any active break (writes lastBreakEndedAt on expiry).
             break_active = self.is_break_active()
@@ -1199,6 +1255,60 @@ def main() -> None:
         font=F("sans", 9, "bold"),
     ).pack(anchor="e", pady=(2, 0))
 
+    focus_card = tk.Frame(
+        today_inner, bg=PAPER,
+        highlightthickness=1, highlightbackground=LINE,
+    )
+    focus_card.pack(fill=tk.X, pady=(0, 22))
+    focus_pad = tk.Frame(focus_card, bg=PAPER)
+    focus_pad.pack(fill=tk.X, padx=28, pady=22)
+    tk.Label(
+        focus_pad, text="FOCUS NOW", bg=PAPER, fg=INK3,
+        font=F("sans", 9, "bold"), anchor="w",
+    ).pack(anchor="w")
+    focus_status_var = tk.StringVar(value="Start a session right away.")
+    tk.Label(
+        focus_pad, textvariable=focus_status_var, bg=PAPER, fg=INK,
+        font=F("serif", 18), anchor="w",
+    ).pack(anchor="w", pady=(4, 4))
+    focus_sub_var = tk.StringVar(
+        value="Blocks immediately for the chosen duration. No calendar event needed.")
+    tk.Label(
+        focus_pad, textvariable=focus_sub_var, bg=PAPER, fg=INK2,
+        font=F("sans", 11), anchor="w",
+        wraplength=820, justify="left",
+    ).pack(anchor="w", pady=(0, 14))
+    focus_btn_row = tk.Frame(focus_pad, bg=PAPER)
+    focus_btn_row.pack(fill=tk.X)
+
+    def start_focus(minutes: int) -> None:
+        if killer.manual_focus_window() is not None:
+            return
+        if outlook_calendar.current_deep_work_event(datetime.now()) is not None:
+            return
+        if killer.is_break_active():
+            return
+        if not messagebox.askyesno(
+            "Start focus session",
+            f"Start a {minutes}-minute focus session now?\n\n"
+            "Blocked apps will be killed for the duration. "
+            "An allowance break will require the usual word challenge.",
+            parent=root,
+        ):
+            return
+        killer.start_manual_focus(minutes)
+
+    focus_30_btn = make_button(
+        focus_btn_row, "Focus now · 30 min",
+        lambda: start_focus(30), primary=True,
+    )
+    focus_30_btn.pack(side=tk.LEFT)
+    focus_60_btn = make_button(
+        focus_btn_row, "Focus now · 60 min",
+        lambda: start_focus(60),
+    )
+    focus_60_btn.pack(side=tk.LEFT, padx=(10, 0))
+
     al_card = tk.Frame(
         today_inner, bg=PAPER,
         highlightthickness=1, highlightbackground=LINE,
@@ -1660,16 +1770,20 @@ def main() -> None:
             hero_meta_var.set(f"Ends at {ends_at.strftime('%H:%M')}")
             hero_time_var.set(_format_remaining(remaining))
         elif window:
-            pill_var.set("BLOCKING NOW")
+            is_manual = window.get("source") == "manual"
+            pill_var.set("FOCUS SESSION" if is_manual else "BLOCKING NOW")
             pill_dot.config(bg=ACCENT)
             pill_label.config(fg=ACCENT)
-            hero_session_var.set("Deep work")
+            hero_session_var.set("Focus session" if is_manual else "Deep work")
             try:
                 _w_start = datetime.fromisoformat(window["start"]).strftime("%H:%M")
                 _w_end = datetime.fromisoformat(window["end"]).strftime("%H:%M")
                 hero_meta_var.set(f"{_w_start} – {_w_end} · ends at {_w_end}")
             except (KeyError, ValueError):
-                hero_meta_var.set("Deep work · in progress")
+                hero_meta_var.set(
+                    "Focus session · in progress" if is_manual
+                    else "Deep work · in progress"
+                )
             try:
                 end_dt = datetime.fromisoformat(window["end"])
                 rem = (end_dt - now).total_seconds()
@@ -1712,8 +1826,45 @@ def main() -> None:
             f"{cool_min} min cooldown"
         )
 
+        manual_active = bool(window) and window.get("source") == "manual"
+        cal_active = bool(window) and window.get("source") != "manual"
+        if manual_active:
+            try:
+                end_dt = datetime.fromisoformat(window["end"])
+                focus_status_var.set(
+                    f"Focus session in progress · ends {end_dt.strftime('%H:%M')}.")
+            except (KeyError, ValueError):
+                focus_status_var.set("Focus session in progress.")
+            focus_sub_var.set(
+                "Use the allowance break above if you need to step out.")
+            focus_30_btn.config(state=tk.DISABLED)
+            focus_60_btn.config(state=tk.DISABLED)
+        elif cal_active:
+            focus_status_var.set("Deep work block active.")
+            focus_sub_var.set(
+                "A calendar block is already running. "
+                "Manual focus isn't needed right now.")
+            focus_30_btn.config(state=tk.DISABLED)
+            focus_60_btn.config(state=tk.DISABLED)
+        elif ends_at and now < ends_at:
+            focus_status_var.set("Allowance break active.")
+            focus_sub_var.set(
+                "Wait for the break to end before starting a focus session.")
+            focus_30_btn.config(state=tk.DISABLED)
+            focus_60_btn.config(state=tk.DISABLED)
+        else:
+            focus_status_var.set("Start a session right away.")
+            focus_sub_var.set(
+                "Blocks immediately for the chosen duration. "
+                "No calendar event needed.")
+            focus_30_btn.config(state=tk.NORMAL)
+            focus_60_btn.config(state=tk.NORMAL)
+
         if window:
-            sb_label_var.set("Deep work")
+            sb_label_var.set(
+                "Focus session" if window.get("source") == "manual"
+                else "Deep work"
+            )
             try:
                 _sb_end = datetime.fromisoformat(window["end"]).strftime("%H:%M")
                 sb_sub_var.set(f"ends {_sb_end}")
