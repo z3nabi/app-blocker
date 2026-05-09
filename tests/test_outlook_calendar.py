@@ -426,5 +426,53 @@ class TestTrySync(unittest.TestCase):
         self.assertEqual(len(outlook_calendar._get_cache_for_tests()["events"]), 1)
 
 
+import time as _time
+
+
+class TestBackgroundSync(unittest.TestCase):
+    def setUp(self):
+        outlook_calendar._reset_for_tests()
+        # Make sure no thread leaks across tests.
+        outlook_calendar._stop_background_sync_for_tests()
+
+    def tearDown(self):
+        outlook_calendar._stop_background_sync_for_tests()
+
+    def test_force_refresh_triggers_sync(self):
+        call_count = {"n": 0}
+
+        def fake_sync(cache_path, category):
+            call_count["n"] += 1
+
+        with patch.object(outlook_calendar, "_try_sync", side_effect=fake_sync):
+            with tempfile.TemporaryDirectory() as d:
+                cache_path = Path(d) / "cache.json"
+                outlook_calendar.start_background_sync(
+                    interval_seconds=3600, cache_path=cache_path, category="Deep Work")
+                # Initial sync runs once at startup.
+                # Wait briefly for the initial pass.
+                deadline = _time.time() + 2.0
+                while call_count["n"] < 1 and _time.time() < deadline:
+                    _time.sleep(0.05)
+                self.assertGreaterEqual(call_count["n"], 1)
+                # force_refresh triggers another pass.
+                outlook_calendar.force_refresh()
+                deadline = _time.time() + 2.0
+                while call_count["n"] < 2 and _time.time() < deadline:
+                    _time.sleep(0.05)
+                self.assertGreaterEqual(call_count["n"], 2)
+
+    def test_start_background_sync_is_idempotent(self):
+        with patch.object(outlook_calendar, "_try_sync"):
+            with tempfile.TemporaryDirectory() as d:
+                cache_path = Path(d) / "cache.json"
+                outlook_calendar.start_background_sync(
+                    interval_seconds=3600, cache_path=cache_path, category="Deep Work")
+                outlook_calendar.start_background_sync(
+                    interval_seconds=3600, cache_path=cache_path, category="Deep Work")
+                # No exception, only one daemon thread.
+                self.assertTrue(outlook_calendar._is_background_running_for_tests())
+
+
 if __name__ == "__main__":
     unittest.main()

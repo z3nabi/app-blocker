@@ -266,3 +266,79 @@ def _get_cache_for_tests() -> dict:
     """Snapshot of in-memory cache. Test-only."""
     with _cache_lock:
         return dict(_cache)
+
+
+import time as _time
+
+
+# Sentinel: the daemon thread (or None if not started).
+_sync_thread: threading.Thread | None = None
+_sync_thread_lock = threading.Lock()
+_sync_wakeup = threading.Event()
+_sync_stop = threading.Event()
+
+
+def _sync_loop(cache_path: Path, category: str, interval_seconds: int) -> None:
+    """Daemon loop: sync, sleep, repeat. Wakes early if force_refresh fires."""
+    while not _sync_stop.is_set():
+        try:
+            _try_sync(cache_path=cache_path, category=category)
+        except Exception:
+            # _try_sync should never raise, but defense-in-depth.
+            pass
+        # Sleep up to interval_seconds, but wake immediately on force_refresh.
+        _sync_wakeup.wait(timeout=interval_seconds)
+        _sync_wakeup.clear()
+
+
+def start_background_sync(
+    *,
+    interval_seconds: int = 60,
+    cache_path: Path | None = None,
+    category: str = "Deep Work",
+) -> None:
+    """Start the daemon refresh thread. Idempotent: safe to call multiple times."""
+    global _sync_thread
+    with _sync_thread_lock:
+        if _sync_thread is not None and _sync_thread.is_alive():
+            return
+        if cache_path is None:
+            cache_path = Path.home() / ".app-blocker" / "calendar-cache.json"
+        # Pre-load on-disk cache so the first tick has data even before the first sync completes.
+        loaded = _load_cache(cache_path)
+        global _cache
+        with _cache_lock:
+            _cache = loaded
+        _sync_stop.clear()
+        _sync_wakeup.clear()
+        t = threading.Thread(
+            target=_sync_loop,
+            kwargs={"cache_path": cache_path, "category": category,
+                    "interval_seconds": interval_seconds},
+            name="outlook-calendar-sync",
+            daemon=True,
+        )
+        _sync_thread = t
+        t.start()
+
+
+def force_refresh() -> None:
+    """Wake the sync thread to run a sync immediately. No-op if thread not started."""
+    _sync_wakeup.set()
+
+
+def _stop_background_sync_for_tests() -> None:
+    """Test-only: signal the sync thread to exit and join it."""
+    global _sync_thread
+    with _sync_thread_lock:
+        if _sync_thread is None:
+            return
+        _sync_stop.set()
+        _sync_wakeup.set()  # wake it so it sees the stop flag
+        _sync_thread.join(timeout=2.0)
+        _sync_thread = None
+
+
+def _is_background_running_for_tests() -> bool:
+    with _sync_thread_lock:
+        return _sync_thread is not None and _sync_thread.is_alive()
