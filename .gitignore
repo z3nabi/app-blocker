@@ -15,3 +15,6 @@ venv/
 # App runtime state (never commit local config / state)
 config.json
 state.json
+
+# Claude Code (per-machine permission overrides; project-shared settings go in .claude/settings.json)
+.claude/settings.local.json
