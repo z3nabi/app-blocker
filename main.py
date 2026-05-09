@@ -936,112 +936,6 @@ def uninstall_launch_at_login() -> tuple[bool, str]:
     return False, "Launch-at-login not supported on this platform."
 
 
-# ---------------------------------------------------------------------------
-# Schedule window editor (modal)
-# ---------------------------------------------------------------------------
-
-class ScheduleWindowEditor:
-    """Modal dialog for adding or editing a single schedule window."""
-
-    def __init__(self, parent: tk.Tk, on_save, *, day: str | None = None,
-                 start: str | None = None, end: str | None = None,
-                 title: str = "Add schedule window") -> None:
-        self.on_save = on_save
-        self.win = tk.Toplevel(parent)
-        self.win.title(title)
-        self.win.geometry("340x220")
-        self.win.transient(parent)
-        self.win.grab_set()
-        self.win.resizable(False, False)
-
-        body = ttk.Frame(self.win, padding=16)
-        body.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(body, text="Day:").grid(row=0, column=0, sticky="w", pady=4)
-        day_default = DAY_NAMES.get(day or "mon", "Mon")
-        self.day_var = tk.StringVar(value=day_default)
-        day_options = [DAY_NAMES[d] for d in DAY_KEYS]
-        ttk.Combobox(body, textvariable=self.day_var, values=day_options,
-                     state="readonly", width=8).grid(
-            row=0, column=1, sticky="w", padx=(8, 0), pady=4)
-
-        ttk.Label(body, text="Start (HH:MM):").grid(row=1, column=0, sticky="w", pady=4)
-        self.start_var = tk.StringVar(value=start or "09:00")
-        ttk.Entry(body, textvariable=self.start_var, width=8).grid(
-            row=1, column=1, sticky="w", padx=(8, 0), pady=4)
-
-        ttk.Label(body, text="End (HH:MM):").grid(row=2, column=0, sticky="w", pady=4)
-        self.end_var = tk.StringVar(value=end or "17:00")
-        ttk.Entry(body, textvariable=self.end_var, width=8).grid(
-            row=2, column=1, sticky="w", padx=(8, 0), pady=4)
-
-        self.error_var = tk.StringVar(value="")
-        ttk.Label(body, textvariable=self.error_var, foreground="#b00020",
-                  wraplength=300, justify="left").grid(
-            row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
-
-        btns = ttk.Frame(self.win, padding=(16, 0, 16, 16))
-        btns.pack(fill=tk.X)
-        ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side=tk.RIGHT, padx=(8, 0))
-        ttk.Button(btns, text="Save", command=self._on_save).pack(side=tk.RIGHT)
-        self.win.bind("<Return>", lambda e: self._on_save())
-
-        # Center
-        self.win.update_idletasks()
-        try:
-            px = parent.winfo_rootx()
-            py = parent.winfo_rooty()
-            pw = parent.winfo_width()
-            ph = parent.winfo_height()
-            ww = self.win.winfo_width()
-            wh = self.win.winfo_height()
-            self.win.geometry(f"+{px + (pw - ww) // 2}+{py + (ph - wh) // 2}")
-        except Exception:
-            pass
-
-    @staticmethod
-    def _validate_hhmm(s: str) -> tuple[bool, str]:
-        """Accepts '09:00', '9:00', '09:5', etc. Normalizes to 'HH:MM'."""
-        s = s.strip()
-        if ":" not in s:
-            return False, ""
-        parts = s.split(":")
-        if len(parts) != 2:
-            return False, ""
-        try:
-            h = int(parts[0])
-            m = int(parts[1])
-        except ValueError:
-            return False, ""
-        if not (0 <= h <= 23 and 0 <= m <= 59):
-            return False, ""
-        return True, f"{h:02d}:{m:02d}"
-
-    def _on_save(self) -> None:
-        day_name = self.day_var.get()
-        day_key = next((k for k, v in DAY_NAMES.items() if v == day_name), None)
-        if not day_key:
-            self.error_var.set("Pick a day.")
-            return
-        ok_s, start = self._validate_hhmm(self.start_var.get())
-        ok_e, end = self._validate_hhmm(self.end_var.get())
-        if not ok_s:
-            self.error_var.set("Start must be HH:MM (e.g. 09:00).")
-            return
-        if not ok_e:
-            self.error_var.set("End must be HH:MM (e.g. 17:00).")
-            return
-        if start >= end:
-            self.error_var.set(
-                "End must be later than start. "
-                "For cross-midnight, split into two days."
-            )
-            return
-        try:
-            self.on_save(day_key, start, end)
-        finally:
-            self.win.destroy()
-
 
 # ---------------------------------------------------------------------------
 # Main UI
@@ -1057,13 +951,29 @@ def _summarize_blocked(config: dict) -> str:
     return ", ".join(names) if names else "(no matchers)"
 
 
-def _summarize_schedule_today(schedule: dict, now: datetime) -> str:
-    day_key = DAY_KEYS[now.weekday()]
-    windows = schedule.get(day_key, [])
-    if not windows:
-        return f"{DAY_NAMES[day_key]}: no windows"
-    parts = [f"{w.get('start','?')}–{w.get('end','?')}" for w in windows]
-    return f"{DAY_NAMES[day_key]}: " + ", ".join(parts)
+def _summarize_calendar_today(now: datetime) -> str:
+    """Hero-meta line for the Today page: describes the next/current Deep Work block."""
+    current = outlook_calendar.current_deep_work_event(now)
+    if current is not None:
+        try:
+            end = datetime.fromisoformat(current["end"])
+            return f"Deep work · ends {end.strftime('%H:%M')}"
+        except (KeyError, ValueError):
+            return "Deep work · in progress"
+    # Look ahead for today's next Deep Work block.
+    cache = outlook_calendar._get_cache_for_tests()  # internal read; safe to use read-only
+    upcoming = []
+    for ev in cache.get("events", []):
+        try:
+            start = datetime.fromisoformat(ev["start"])
+            if start > now:
+                upcoming.append((start, ev))
+        except (KeyError, ValueError):
+            continue
+    upcoming.sort(key=lambda pair: pair[0])
+    if upcoming:
+        return f"Next deep work: {upcoming[0][0].strftime('%H:%M')}"
+    return "No deep work blocks today"
 
 
 def _format_remaining(seconds: float) -> str:
@@ -1178,7 +1088,7 @@ def main() -> None:
 
     nav_items = [
         ("today", "Today"),
-        ("schedule", "Schedule"),
+        ("calendar", "Calendar"),
         ("blocks", "Block lists"),
         ("settings", "Settings"),
     ]
@@ -1417,238 +1327,73 @@ def main() -> None:
     ).pack(anchor="e", pady=(16, 0))
 
     # =========================================================================
-    # Schedule page
+    # Calendar page
     # =========================================================================
-    schedule_page = tk.Frame(content, bg=WHITE)
-    pages["schedule"] = schedule_page
-    sched_inner = tk.Frame(schedule_page, bg=WHITE)
-    sched_inner.pack(fill=tk.BOTH, expand=True, padx=48, pady=36)
+    calendar_page = tk.Frame(content, bg=WHITE)
+    pages["calendar"] = calendar_page
+    cal_inner = tk.Frame(calendar_page, bg=WHITE)
+    cal_inner.pack(fill="both", expand=True, padx=24, pady=24)
 
     tk.Label(
-        sched_inner, text="SCHEDULE", bg=WHITE, fg=INK3,
-        font=F("sans", 9, "bold"), anchor="w",
-    ).pack(anchor="w")
-    tk.Label(
-        sched_inner, text="Painted hours.", bg=WHITE, fg=INK,
-        font=F("serif", 26), anchor="w",
-    ).pack(anchor="w", pady=(4, 22))
+        cal_inner, text="TODAY'S DEEP WORK BLOCKS", bg=WHITE, fg=INK3,
+        font=(_FONT_CACHE["sans"], 11, "bold"),
+    ).pack(anchor="w", pady=(0, 12))
 
-    sched_viz_card = tk.Frame(
-        sched_inner, bg=PAPER,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    sched_viz_card.pack(fill=tk.X, pady=(0, 18))
-    sched_canvas = tk.Canvas(
-        sched_viz_card, bg=PAPER, height=222, highlightthickness=0,
-    )
-    sched_canvas.pack(fill=tk.X, padx=18, pady=18)
+    cal_list_frame = tk.Frame(cal_inner, bg=WHITE)
+    cal_list_frame.pack(fill="x", anchor="w")
 
-    GRID_ROW_H = 22
-    GRID_GAP = 4
-    GRID_LABEL_W = 44
+    cal_status_var = tk.StringVar(value="")
 
-    def redraw_schedule_canvas() -> None:
-        sched_canvas.delete("all")
-        w = sched_canvas.winfo_width()
-        if w < 100:
-            return
-        col_w = (w - GRID_LABEL_W) / 24.0
-        for h in range(0, 25, 3):
-            x = GRID_LABEL_W + h * col_w
-            sched_canvas.create_text(
-                x + 2, 4, anchor="nw", text=f"{h:02d}",
-                fill=INK3, font=(_FONT_CACHE["mono"], 9),
-            )
-        cfg_now = killer.snapshot()["config"]
-        schedule_now = cfg_now.get("schedule", {}) or {}
-        for di, dk in enumerate(DAY_KEYS):
-            row_y = 22 + di * (GRID_ROW_H + GRID_GAP)
-            sched_canvas.create_text(
-                4, row_y + GRID_ROW_H / 2, anchor="w",
-                text=DAY_NAMES[dk], fill=INK2,
-                font=(_FONT_CACHE["sans"], 10),
-            )
-            sched_canvas.create_rectangle(
-                GRID_LABEL_W, row_y,
-                GRID_LABEL_W + 24 * col_w, row_y + GRID_ROW_H,
-                fill=WHITE, outline=LINE,
-            )
-            for h in range(1, 24):
-                x = GRID_LABEL_W + h * col_w
-                sched_canvas.create_line(
-                    x, row_y + 2, x, row_y + GRID_ROW_H - 2, fill=LINE,
-                )
-            for w_ in schedule_now.get(dk, []):
+    def refresh_calendar_page() -> None:
+        for child in cal_list_frame.winfo_children():
+            child.destroy()
+        cache = outlook_calendar._get_cache_for_tests()
+        events = cache.get("events", [])
+        if not events:
+            tk.Label(
+                cal_list_frame, text="No Deep Work events today.", bg=WHITE, fg=INK2,
+                font=(_FONT_CACHE["serif"], 14),
+            ).pack(anchor="w")
+        else:
+            # Sort by start time for display.
+            sortable = []
+            for ev in events:
                 try:
-                    sh, sm = map(int, w_["start"].split(":"))
-                    eh, em = map(int, w_["end"].split(":"))
+                    sortable.append((datetime.fromisoformat(ev["start"]), ev))
                 except (KeyError, ValueError):
                     continue
-                start_h = sh + sm / 60
-                end_h = eh + em / 60
-                x1 = GRID_LABEL_W + start_h * col_w
-                x2 = GRID_LABEL_W + end_h * col_w
-                sched_canvas.create_rectangle(
-                    x1 + 1, row_y + 2, x2 - 1, row_y + GRID_ROW_H - 2,
-                    fill=ACCENT, outline="", width=0,
-                )
-        now_dt = datetime.now()
-        di = now_dt.weekday()
-        now_h = now_dt.hour + now_dt.minute / 60
-        x = GRID_LABEL_W + now_h * col_w
-        row_y = 22 + di * (GRID_ROW_H + GRID_GAP)
-        sched_canvas.create_line(
-            x, row_y - 4, x, row_y + GRID_ROW_H + 4, fill=INK, width=1,
-        )
+            sortable.sort(key=lambda pair: pair[0])
+            for start, ev in sortable:
+                try:
+                    end = datetime.fromisoformat(ev["end"])
+                except (KeyError, ValueError):
+                    continue
+                line = f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}    {ev.get('subject', '')}"
+                tk.Label(cal_list_frame, text=line, bg=WHITE, fg=INK,
+                         font=(_FONT_CACHE["serif"], 14)).pack(anchor="w", pady=2)
+        # Status line.
+        status = outlook_calendar.last_sync_status()
+        if status["ok"]:
+            cal_status_var.set(f"Last synced at {status['at']}")
+        elif status["error"]:
+            cal_status_var.set(status["error"])
+        else:
+            cal_status_var.set("Never synced")
 
-    sched_canvas.bind("<Configure>", lambda e: redraw_schedule_canvas())
+    tk.Frame(cal_inner, bg=LINE, height=1).pack(fill="x", pady=(20, 12))
+    tk.Label(cal_inner, textvariable=cal_status_var, bg=WHITE, fg=INK3,
+             font=(_FONT_CACHE["sans"], 11)).pack(anchor="w")
 
-    sched_lock_banner = tk.Frame(
-        sched_inner, bg=PAPER_ALT,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    sched_lock_label = tk.Label(
-        sched_lock_banner, bg=PAPER_ALT, fg=INK,
-        text="Schedule frozen during active block.",
-        font=F("sans", 11), anchor="w",
-    )
-    sched_lock_label.pack(side=tk.LEFT, padx=14, pady=10)
-    sched_unlock_btn = make_button(
-        sched_lock_banner, "Unlock to edit", open_edit_unlock_challenge,
-    )
-    sched_unlock_btn.pack(side=tk.RIGHT, padx=10, pady=8)
+    def on_sync_now():
+        outlook_calendar.force_refresh()
+        # Give the sync thread a brief moment, then refresh the page.
+        cal_inner.after(500, refresh_calendar_page)
 
-    sched_card = tk.Frame(
-        sched_inner, bg=WHITE,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    sched_card.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
-    sched_scroll = ttk.Scrollbar(sched_card, orient="vertical")
-    sched_tree = ttk.Treeview(
-        sched_card, columns=("day", "start", "end"),
-        show="headings", height=8, yscrollcommand=sched_scroll.set,
-    )
-    sched_scroll.config(command=sched_tree.yview)
-    sched_tree.heading("day", text="Day")
-    sched_tree.heading("start", text="Start")
-    sched_tree.heading("end", text="End")
-    sched_tree.column("day", width=80, anchor="w")
-    sched_tree.column("start", width=80, anchor="center")
-    sched_tree.column("end", width=80, anchor="center")
-    sched_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-    sched_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    tk.Button(cal_inner, text="Sync now", command=on_sync_now,
+              bg=PAPER_ALT, fg=INK, relief="flat",
+              font=(_FONT_CACHE["sans"], 11)).pack(anchor="w", pady=(12, 0))
 
-    def refresh_schedule_tree() -> None:
-        snap = killer.snapshot()
-        schedule = snap["config"].get("schedule", {}) or {}
-        sel = sched_tree.selection()
-        sel_iid = sel[0] if sel else None
-        sched_tree.delete(*sched_tree.get_children())
-        for day_key in DAY_KEYS:
-            for i, w in enumerate(schedule.get(day_key, []) or []):
-                iid = f"{day_key}:{i}"
-                sched_tree.insert(
-                    "", "end", iid=iid,
-                    values=(DAY_NAMES[day_key],
-                            w.get("start", ""), w.get("end", "")),
-                )
-        if sel_iid and sched_tree.exists(sel_iid):
-            sched_tree.selection_set(sel_iid)
-
-    def _resolve_selected_window() -> tuple[str, int] | None:
-        sel = sched_tree.selection()
-        if not sel:
-            return None
-        iid = sel[0]
-        if ":" not in iid:
-            return None
-        day_key, idx_str = iid.split(":", 1)
-        try:
-            return day_key, int(idx_str)
-        except ValueError:
-            return None
-
-    def add_window() -> None:
-        def on_save(day_key: str, start: str, end: str) -> None:
-            snap = killer.snapshot()
-            cfg = json.loads(json.dumps(snap["config"]))
-            cfg.setdefault("schedule", {}).setdefault(day_key, []).append({
-                "start": start, "end": end,
-            })
-            cfg["schedule"][day_key].sort(key=lambda w: w.get("start", ""))
-            save_config(cfg)
-        ScheduleWindowEditor(root, on_save=on_save)
-
-    def edit_window() -> None:
-        resolved = _resolve_selected_window()
-        if resolved is None:
-            return
-        day_key, idx = resolved
-        snap = killer.snapshot()
-        cfg = snap["config"]
-        windows = cfg.get("schedule", {}).get(day_key, []) or []
-        if idx >= len(windows):
-            return
-        w = windows[idx]
-
-        def on_save(new_day: str, start: str, end: str) -> None:
-            snap2 = killer.snapshot()
-            cfg2 = json.loads(json.dumps(snap2["config"]))
-            old = cfg2.get("schedule", {}).get(day_key, []) or []
-            cfg2.setdefault("schedule", {})[day_key] = [
-                x for i, x in enumerate(old) if i != idx
-            ]
-            cfg2["schedule"].setdefault(new_day, []).append(
-                {"start": start, "end": end})
-            cfg2["schedule"][new_day].sort(key=lambda w: w.get("start", ""))
-            save_config(cfg2)
-
-        ScheduleWindowEditor(
-            root, on_save=on_save,
-            day=day_key, start=w.get("start"), end=w.get("end"),
-            title="Edit schedule window",
-        )
-
-    def remove_window() -> None:
-        resolved = _resolve_selected_window()
-        if resolved is None:
-            return
-        day_key, idx = resolved
-        snap = killer.snapshot()
-        cfg = json.loads(json.dumps(snap["config"]))
-        windows = cfg.get("schedule", {}).get(day_key, []) or []
-        if idx < len(windows):
-            cfg["schedule"][day_key] = [
-                x for i, x in enumerate(windows) if i != idx
-            ]
-            save_config(cfg)
-
-    def _maybe_edit_window(_e=None) -> None:
-        if killer.is_edit_locked():
-            return
-        edit_window()
-
-    sched_tree.bind("<Double-Button-1>", _maybe_edit_window)
-
-    sched_btns = tk.Frame(sched_inner, bg=WHITE)
-    sched_btns.pack(fill=tk.X)
-    sched_add_btn = make_button(sched_btns, "Add window…", add_window)
-    sched_edit_btn = make_button(sched_btns, "Edit selected…", edit_window)
-    sched_remove_btn = make_button(sched_btns, "Remove selected", remove_window)
-    sched_add_btn.pack(side=tk.LEFT, padx=(0, 8))
-    sched_edit_btn.pack(side=tk.LEFT, padx=(0, 8))
-    sched_remove_btn.pack(side=tk.LEFT)
-
-    sched_stats_card = tk.Frame(
-        sched_inner, bg=PAPER,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    sched_stats_card.pack(fill=tk.X, pady=(16, 0))
-    sched_stats_var = tk.StringVar(value="")
-    tk.Label(
-        sched_stats_card, textvariable=sched_stats_var, bg=PAPER, fg=INK2,
-        font=F("sans", 11), anchor="w",
-    ).pack(fill=tk.X, padx=16, pady=12)
+    refresh_calendar_page()
 
     # =========================================================================
     # Block lists page
@@ -1942,8 +1687,7 @@ def main() -> None:
             pill_dot.config(bg=INK3)
             pill_label.config(fg=INK3)
             hero_session_var.set("No active block")
-            hero_meta_var.set(_summarize_schedule_today(
-                cfg.get("schedule", {}), now))
+            hero_meta_var.set(_summarize_calendar_today(now))
             hero_time_var.set("—")
 
         s_settings = cfg.get("settings", {}) or {}
@@ -1983,8 +1727,7 @@ def main() -> None:
                 sb_sub_var.set("active")
         else:
             sb_label_var.set("None")
-            sb_sub_var.set(_summarize_schedule_today(
-                cfg.get("schedule", {}), now))
+            sb_sub_var.set(_summarize_calendar_today(now))
 
         kills = snap["kills"]
         last_tick = snap["last_tick_at"]
@@ -2039,44 +1782,20 @@ def main() -> None:
         )
 
         refresh_apps_list()
-        refresh_schedule_tree()
-        redraw_schedule_canvas()
-
-        total_min = 0
-        for dk in DAY_KEYS:
-            for w_ in cfg.get("schedule", {}).get(dk, []):
-                try:
-                    sh, sm = map(int, w_["start"].split(":"))
-                    eh, em = map(int, w_["end"].split(":"))
-                    total_min += (eh * 60 + em) - (sh * 60 + sm)
-                except Exception:
-                    pass
-        hours = total_min // 60
-        mins = total_min % 60
-        sched_stats_var.set(
-            f"{hours}h {mins:02d}m blocked per week — repeats every week."
-        )
+        refresh_calendar_page()
 
         locked = killer.is_edit_locked()
         edit_remaining = killer.edit_unlock_remaining_seconds()
-        edit_buttons = (
-            apps_add_btn, apps_remove_btn,
-            sched_add_btn, sched_edit_btn, sched_remove_btn,
-        )
+        edit_buttons = (apps_add_btn, apps_remove_btn)
         if locked:
             if not blocks_lock_banner.winfo_ismapped():
                 blocks_lock_banner.pack(
                     fill=tk.X, pady=(0, 12), before=blocks_card)
-            if not sched_lock_banner.winfo_ismapped():
-                sched_lock_banner.pack(
-                    fill=tk.X, pady=(0, 12), before=sched_card)
             for b in edit_buttons:
                 b.config(state=tk.DISABLED)
         else:
             if blocks_lock_banner.winfo_ismapped():
                 blocks_lock_banner.pack_forget()
-            if sched_lock_banner.winfo_ismapped():
-                sched_lock_banner.pack_forget()
             for b in edit_buttons:
                 b.config(state=tk.NORMAL)
             if edit_remaining > 0:
@@ -2085,12 +1804,9 @@ def main() -> None:
                     f"remaining"
                 )
                 blocks_lock_label.config(text=rem)
-                sched_lock_label.config(text=rem)
             else:
                 blocks_lock_label.config(
                     text="List frozen during active block.")
-                sched_lock_label.config(
-                    text="Schedule frozen during active block.")
 
         focused = root.focus_get()
         if focused not in spinboxes:
