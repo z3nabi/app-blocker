@@ -961,12 +961,12 @@ def _summarize_calendar_today(now: datetime) -> str:
         except (KeyError, ValueError):
             return "Deep work · in progress"
     # Look ahead for today's next Deep Work block.
-    cache = outlook_calendar._get_cache_for_tests()  # internal read; safe to use read-only
+    cache = outlook_calendar._snapshot_cache()
     upcoming = []
     for ev in cache.get("events", []):
         try:
             start = datetime.fromisoformat(ev["start"])
-            if start > now:
+            if start > now and start.date() == now.date():
                 upcoming.append((start, ev))
         except (KeyError, ValueError):
             continue
@@ -1347,7 +1347,7 @@ def main() -> None:
     def refresh_calendar_page() -> None:
         for child in cal_list_frame.winfo_children():
             child.destroy()
-        cache = outlook_calendar._get_cache_for_tests()
+        cache = outlook_calendar._snapshot_cache()
         events = cache.get("events", [])
         if not events:
             tk.Label(

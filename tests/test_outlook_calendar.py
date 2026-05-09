@@ -376,7 +376,7 @@ class TestTrySync(unittest.TestCase):
         self.assertTrue(status["ok"])
         self.assertIsNone(status["error"])
         self.assertIsNotNone(status["at"])
-        self.assertEqual(len(outlook_calendar._get_cache_for_tests()["events"]), 1)
+        self.assertEqual(len(outlook_calendar._snapshot_cache()["events"]), 1)
 
     def test_outlook_not_running_leaves_cache_unchanged(self):
         # Pre-populate cache with one event.
@@ -401,8 +401,8 @@ class TestTrySync(unittest.TestCase):
         self.assertFalse(status["ok"])
         self.assertEqual(status["error"], "Outlook not open")
         # Cache is preserved.
-        self.assertEqual(len(outlook_calendar._get_cache_for_tests()["events"]), 1)
-        self.assertEqual(outlook_calendar._get_cache_for_tests()["events"][0]["subject"], "Prior")
+        self.assertEqual(len(outlook_calendar._snapshot_cache()["events"]), 1)
+        self.assertEqual(outlook_calendar._snapshot_cache()["events"][0]["subject"], "Prior")
 
     def test_arbitrary_com_failure_leaves_cache_unchanged(self):
         prior = {
@@ -423,7 +423,7 @@ class TestTrySync(unittest.TestCase):
         status = outlook_calendar.last_sync_status()
         self.assertFalse(status["ok"])
         self.assertIn("calendar locked", status["error"])
-        self.assertEqual(len(outlook_calendar._get_cache_for_tests()["events"]), 1)
+        self.assertEqual(len(outlook_calendar._snapshot_cache()["events"]), 1)
 
 
 import time as _time

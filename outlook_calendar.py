@@ -262,8 +262,8 @@ def last_sync_status() -> dict:
         }
 
 
-def _get_cache_for_tests() -> dict:
-    """Snapshot of in-memory cache. Test-only."""
+def _snapshot_cache() -> dict:
+    """Return a shallow snapshot of the in-memory cache (private API for the UI)."""
     with _cache_lock:
         return dict(_cache)
 
