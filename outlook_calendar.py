@@ -24,12 +24,34 @@ import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
+_WIN32_IMPORT_ERROR: str | None = None
 try:
     import win32com.client  # type: ignore
     import pywintypes  # type: ignore
     HAVE_WIN32 = True
-except ImportError:
+except ImportError as _e:
     HAVE_WIN32 = False
+    _WIN32_IMPORT_ERROR = str(_e)
+
+_TRACE_ENABLED = os.environ.get("OUTLOOK_CALENDAR_TRACE", "1") != "0"
+
+
+def _trace(msg: str) -> None:
+    """Diagnostic trace to stderr. Prefixed so the user can grep the console.
+
+    Disabled by setting `outlook_calendar._TRACE_ENABLED = False` (used by tests
+    to keep stderr clean), or by setting env var OUTLOOK_CALENDAR_TRACE=0 before
+    the module is imported.
+    """
+    if not _TRACE_ENABLED:
+        return
+    print(f"[outlook_calendar] {msg}", file=sys.stderr, flush=True)
+
+
+_trace(
+    f"module load: HAVE_WIN32={HAVE_WIN32}, sys.platform={sys.platform!r}"
+    + (f", import_error={_WIN32_IMPORT_ERROR!r}" if _WIN32_IMPORT_ERROR else "")
+)
 
 
 def _event_has_category(categories_field: str | None, target: str) -> bool:
@@ -152,10 +174,17 @@ def _get_active_outlook():
     would create a kill/relaunch loop because Outlook is itself a blocked app.
     """
     if not HAVE_WIN32 or sys.platform != "win32":
+        _trace(
+            f"_get_active_outlook: skipping (HAVE_WIN32={HAVE_WIN32}, "
+            f"sys.platform={sys.platform!r})"
+        )
         raise OutlookNotRunning()
     try:
-        return win32com.client.GetActiveObject("Outlook.Application")
-    except pywintypes.com_error:
+        app = win32com.client.GetActiveObject("Outlook.Application")
+        _trace("_get_active_outlook: GetActiveObject succeeded")
+        return app
+    except pywintypes.com_error as e:
+        _trace(f"_get_active_outlook: GetActiveObject raised com_error: {e!r}")
         raise OutlookNotRunning()
 
 
@@ -204,6 +233,7 @@ def _fetch_today_events_from_outlook(outlook_app, today: date, category: str) ->
             # Per spec — skip unreadable items, never abort the loop.
             pass
         item = restricted.GetNext()
+    _trace(f"_fetch_today_events_from_outlook: scanned items, matched {len(out)} on category {category!r}")
     return out
 
 
@@ -211,20 +241,26 @@ def _try_sync(cache_path: Path, category: str) -> None:
     """Attempt one sync. Update in-memory cache + disk on success;
     update last_sync_status either way. Never raises."""
     global _cache
+    _trace(f"_try_sync: starting (cache_path={cache_path}, category={category!r})")
     try:
         outlook_app = _get_active_outlook()
     except OutlookNotRunning:
+        _trace("_try_sync: Outlook not open; cache untouched")
         _update_status(ok=False, error="Outlook not open")
         return
     except Exception as e:
+        _trace(f"_try_sync: connect error {type(e).__name__}: {e}")
         _update_status(ok=False, error=f"Sync error: {e}")
         return
 
     try:
         events = _fetch_today_events_from_outlook(outlook_app, date.today(), category)
     except Exception as e:
+        _trace(f"_try_sync: fetch error {type(e).__name__}: {e}")
         _update_status(ok=False, error=f"Sync error: {e}")
         return
+
+    _trace(f"_try_sync: fetched {len(events)} matching event(s)")
 
     now_iso = datetime.now().replace(microsecond=0).isoformat()
     new_cache = {
@@ -237,9 +273,12 @@ def _try_sync(cache_path: Path, category: str) -> None:
         _cache = new_cache
     try:
         _save_cache(cache_path, new_cache)
-    except Exception:
+    except Exception as e:
+        _trace(f"_try_sync: disk save failed (non-fatal): {type(e).__name__}: {e}")
         # Disk write or serialization failure is non-fatal — in-memory cache is still updated.
         pass
+    else:
+        _trace("_try_sync: cache persisted to disk")
 
 
 def _update_status(*, ok: bool, error: str | None) -> None:

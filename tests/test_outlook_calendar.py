@@ -6,12 +6,21 @@ application object directly into the function under test.
 """
 
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, date
 from pathlib import Path
 
+# Silence module trace output during tests — set env var BEFORE import so the
+# module-load banner is also suppressed (it fires during import, before any
+# assignment to outlook_calendar._TRACE_ENABLED could take effect).
+os.environ["OUTLOOK_CALENDAR_TRACE"] = "0"
+
 import outlook_calendar
+
+# Belt-and-suspenders: also set the flag for traces emitted after module load.
+outlook_calendar._TRACE_ENABLED = False
 
 
 class TestModuleImport(unittest.TestCase):
