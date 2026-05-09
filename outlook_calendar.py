@@ -237,8 +237,8 @@ def _try_sync(cache_path: Path, category: str) -> None:
         _cache = new_cache
     try:
         _save_cache(cache_path, new_cache)
-    except OSError:
-        # Disk write failure is non-fatal — in-memory cache is still updated.
+    except Exception:
+        # Disk write or serialization failure is non-fatal — in-memory cache is still updated.
         pass
 
 
