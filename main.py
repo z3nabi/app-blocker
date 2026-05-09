@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import queue
 import random
 import signal
 import subprocess
@@ -1105,16 +1106,40 @@ def main() -> None:
         except tk.TclError:
             pass
 
+    # Tray callbacks fire on the tray's worker thread. Calling root.after from
+    # a non-Tk thread is not thread-safe and can corrupt Tk's event dispatcher,
+    # which surfaces as "focused widgets stop receiving keystrokes" (e.g. the
+    # Allowance break modal goes deaf to typing). Marshal through a queue that
+    # Tk polls from its own thread.
+    _tray_actions: queue.Queue = queue.Queue()
+
+    def _drain_tray_actions() -> None:
+        try:
+            while True:
+                action = _tray_actions.get_nowait()
+                if action == "show":
+                    _restore_window()
+                elif action == "quit":
+                    _quit_app()
+                    return  # root is gone; don't reschedule
+        except queue.Empty:
+            pass
+        try:
+            root.after(150, _drain_tray_actions)
+        except tk.TclError:
+            pass
+
     if tray.HAVE_WIN32 and sys.platform == "win32":
         try:
             icon_path = Path(__file__).resolve().parent / "assets" / "stillwater.ico"
             tray_icon = tray.TrayIcon(
                 title="Stillwater · App Blocker",
-                on_show=lambda: root.after(0, _restore_window),
-                on_quit=lambda: root.after(0, _quit_app),
+                on_show=lambda: _tray_actions.put("show"),
+                on_quit=lambda: _tray_actions.put("quit"),
                 icon_path=icon_path if icon_path.is_file() else None,
             )
             tray_icon.start()
+            root.after(150, _drain_tray_actions)
         except Exception:
             tray_icon = None
 
