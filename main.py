@@ -1139,16 +1139,40 @@ def main() -> None:
         bg = INK if primary else WHITE
         fg = WHITE if primary else INK
         active_bg = INK2 if primary else PAPER_ALT
-        bd_color = INK if primary else LINE
-        return tk.Button(
+        bd_color = INK if primary else INK2
+        btn = tk.Button(
             parent, text=text, command=command,
             bg=bg, fg=fg, activebackground=active_bg, activeforeground=fg,
-            disabledforeground=PAPER_ALT if primary else INK3,
-            font=F("sans", 10), padx=14, pady=6,
+            disabledforeground=INK3,
+            font=F("sans", 10), padx=18, pady=8,
             relief="flat", borderwidth=0,
             highlightthickness=1, highlightbackground=bd_color,
             cursor="hand2",
         )
+        btn._sw_primary = primary  # type: ignore[attr-defined]
+        return btn
+
+    def set_button_enabled(btn: tk.Button, enabled: bool) -> None:
+        """Toggle visual + interactive state. tk.Button's default disabled
+        rendering only dims the foreground, which is too subtle on this
+        palette — we also flip background, border, and cursor."""
+        primary = getattr(btn, "_sw_primary", False)
+        if enabled:
+            btn.config(
+                state=tk.NORMAL,
+                bg=INK if primary else WHITE,
+                fg=WHITE if primary else INK,
+                highlightbackground=INK if primary else INK2,
+                cursor="hand2",
+            )
+        else:
+            btn.config(
+                state=tk.DISABLED,
+                bg=PAPER,
+                fg=INK3,
+                highlightbackground=LINE,
+                cursor="arrow",
+            )
 
     def _challenge_word_count() -> int:
         n = int(killer._settings().get("challengeWordCount", 50))
@@ -1350,6 +1374,9 @@ def main() -> None:
 
     actions_row = tk.Frame(today_inner, bg=WHITE)
     actions_row.pack(fill=tk.X, pady=(0, 22))
+    # Inner holder packed without fill/anchor → x-centered in actions_row.
+    actions_inner = tk.Frame(actions_row, bg=WHITE)
+    actions_inner.pack()
 
     def start_focus(minutes: int) -> None:
         if killer.manual_focus_window() is not None:
@@ -1369,17 +1396,17 @@ def main() -> None:
         killer.start_manual_focus(minutes)
 
     focus_30_btn = make_button(
-        actions_row, "Focus 30 min", lambda: start_focus(30), primary=True,
+        actions_inner, "Focus 30 min", lambda: start_focus(30), primary=True,
     )
-    focus_30_btn.pack(side=tk.LEFT)
+    focus_30_btn.pack(side=tk.LEFT, padx=4)
     focus_60_btn = make_button(
-        actions_row, "Focus 60 min", lambda: start_focus(60),
+        actions_inner, "Focus 60 min", lambda: start_focus(60),
     )
-    focus_60_btn.pack(side=tk.LEFT, padx=(10, 0))
+    focus_60_btn.pack(side=tk.LEFT, padx=4)
     break_btn = make_button(
-        actions_row, "Allowance break", open_challenge,
+        actions_inner, "Allowance break", open_challenge,
     )
-    break_btn.pack(side=tk.LEFT, padx=(10, 0))
+    break_btn.pack(side=tk.LEFT, padx=4)
 
     stats_grid = tk.Frame(
         today_inner, bg=LINE,
@@ -1837,12 +1864,11 @@ def main() -> None:
             hero_time_var.set("—")
 
         ok, _reason = killer.can_take_break()
-        break_btn.config(state=tk.NORMAL if (ok and not ends_at) else tk.DISABLED)
+        set_button_enabled(break_btn, ok and not ends_at)
 
         focus_blocked = bool(window) or bool(ends_at and now < ends_at)
-        focus_state = tk.DISABLED if focus_blocked else tk.NORMAL
-        focus_30_btn.config(state=focus_state)
-        focus_60_btn.config(state=focus_state)
+        set_button_enabled(focus_30_btn, not focus_blocked)
+        set_button_enabled(focus_60_btn, not focus_blocked)
 
         if window:
             sb_label_var.set(
@@ -1921,12 +1947,12 @@ def main() -> None:
                 blocks_lock_banner.pack(
                     fill=tk.X, pady=(0, 12), before=blocks_card)
             for b in edit_buttons:
-                b.config(state=tk.DISABLED)
+                set_button_enabled(b, False)
         else:
             if blocks_lock_banner.winfo_ismapped():
                 blocks_lock_banner.pack_forget()
             for b in edit_buttons:
-                b.config(state=tk.NORMAL)
+                set_button_enabled(b, True)
             if edit_remaining > 0:
                 rem = (
                     f"Edit access: {_format_remaining(edit_remaining)} "
