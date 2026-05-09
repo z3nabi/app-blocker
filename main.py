@@ -1015,7 +1015,9 @@ def _summarize_calendar_today(now: datetime) -> str:
     upcoming = []
     for ev in cache.get("events", []):
         try:
-            start = datetime.fromisoformat(ev["start"])
+            # Strip tzinfo: pywintypes emits tz-aware ISO strings, but `now` is
+            # naive (datetime.now()). Same defense as outlook_calendar._event_covers.
+            start = datetime.fromisoformat(ev["start"]).replace(tzinfo=None)
             if start > now and start.date() == now.date():
                 upcoming.append((start, ev))
         except (KeyError, ValueError):
