@@ -13,6 +13,7 @@ via root.after(0, ...)).
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 _WIN32_IMPORT_ERROR: str | None = None
 try:
@@ -36,12 +37,14 @@ class TrayIcon:
     Callbacks fire on the tray's worker thread.
     """
 
-    def __init__(self, *, title: str, on_show, on_quit) -> None:
+    def __init__(self, *, title: str, on_show, on_quit,
+                 icon_path: str | Path | None = None) -> None:
         if not HAVE_WIN32:
             raise RuntimeError(f"pywin32 unavailable: {_WIN32_IMPORT_ERROR}")
         self._title = title
         self._on_show = on_show
         self._on_quit = on_quit
+        self._icon_path = Path(icon_path) if icon_path else None
         self._hwnd: int | None = None
         self._hicon = None
         self._tray_id = 1
@@ -80,7 +83,7 @@ class TrayIcon:
         )
         win32gui.UpdateWindow(self._hwnd)
 
-        self._hicon = win32gui.LoadIcon(0, win32con.IDI_APPLICATION)
+        self._hicon = self._load_icon()
         flags = win32gui.NIF_ICON | win32gui.NIF_MESSAGE | win32gui.NIF_TIP
         nid = (self._hwnd, self._tray_id, flags, WM_TRAYICON,
                self._hicon, self._title)
@@ -114,6 +117,19 @@ class TrayIcon:
             win32gui.PostQuitMessage(0)
             return 0
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+
+    def _load_icon(self):
+        if self._icon_path and self._icon_path.is_file():
+            try:
+                cx = win32api.GetSystemMetrics(win32con.SM_CXSMICON)
+                cy = win32api.GetSystemMetrics(win32con.SM_CYSMICON)
+                return win32gui.LoadImage(
+                    0, str(self._icon_path), win32con.IMAGE_ICON,
+                    cx, cy, win32con.LR_LOADFROMFILE,
+                )
+            except Exception:
+                pass
+        return win32gui.LoadIcon(0, win32con.IDI_APPLICATION)
 
     def _show_menu(self) -> None:
         menu = win32gui.CreatePopupMenu()

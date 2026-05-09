@@ -1101,10 +1101,12 @@ def main() -> None:
 
     if tray.HAVE_WIN32 and sys.platform == "win32":
         try:
+            icon_path = Path(__file__).resolve().parent / "assets" / "stillwater.ico"
             tray_icon = tray.TrayIcon(
                 title="Stillwater · App Blocker",
                 on_show=lambda: root.after(0, _restore_window),
                 on_quit=lambda: root.after(0, _quit_app),
+                icon_path=icon_path if icon_path.is_file() else None,
             )
             tray_icon.start()
         except Exception:
