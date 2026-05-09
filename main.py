@@ -1248,8 +1248,48 @@ def main() -> None:
     # =========================================================================
     today_page = tk.Frame(content, bg=WHITE)
     pages["today"] = today_page
-    today_inner = tk.Frame(today_page, bg=WHITE)
+    # Scrollable Today: Canvas + Scrollbar wrap a padded inner frame so
+    # content overflowing the window height can be scrolled.
+    _today_canvas = tk.Canvas(today_page, bg=WHITE, highlightthickness=0)
+    _today_vsb = ttk.Scrollbar(today_page, orient="vertical", command=_today_canvas.yview)
+    _today_canvas.configure(yscrollcommand=_today_vsb.set)
+    _today_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+    _today_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    _today_padframe = tk.Frame(_today_canvas, bg=WHITE)
+    _today_padframe_id = _today_canvas.create_window((0, 0), window=_today_padframe, anchor="nw")
+    today_inner = tk.Frame(_today_padframe, bg=WHITE)
     today_inner.pack(fill=tk.BOTH, expand=True, padx=48, pady=36)
+
+    def _on_today_padframe_configure(_e):
+        _today_canvas.configure(scrollregion=_today_canvas.bbox("all"))
+
+    def _on_today_canvas_configure(e):
+        # Track canvas width so the padded inner frame fills the viewport.
+        _today_canvas.itemconfigure(_today_padframe_id, width=e.width)
+
+    _today_padframe.bind("<Configure>", _on_today_padframe_configure)
+    _today_canvas.bind("<Configure>", _on_today_canvas_configure)
+
+    def _on_today_mousewheel(e):
+        if current_page.get() != "today":
+            return
+        # macOS sends small deltas; Windows sends multiples of 120.
+        if sys.platform == "darwin":
+            _today_canvas.yview_scroll(-1 * e.delta, "units")
+        else:
+            _today_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+    root.bind_all("<MouseWheel>", _on_today_mousewheel, add="+")
+    root.bind_all(
+        "<Button-4>",
+        lambda e: _today_canvas.yview_scroll(-1, "units") if current_page.get() == "today" else None,
+        add="+",
+    )
+    root.bind_all(
+        "<Button-5>",
+        lambda e: _today_canvas.yview_scroll(1, "units") if current_page.get() == "today" else None,
+        add="+",
+    )
 
     today_date_var = tk.StringVar(value="")
     tk.Label(
