@@ -2003,7 +2003,11 @@ def main() -> None:
 
         if window:
             sb_label_var.set("Deep work")
-            sb_sub_var.set(f"ends {window.get('end','?')}")
+            try:
+                _sb_end = datetime.fromisoformat(window["end"]).strftime("%H:%M")
+                sb_sub_var.set(f"ends {_sb_end}")
+            except (KeyError, ValueError):
+                sb_sub_var.set("active")
         else:
             sb_label_var.set("None")
             sb_sub_var.set(_summarize_schedule_today(
