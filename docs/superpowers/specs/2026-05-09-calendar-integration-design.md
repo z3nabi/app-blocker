@@ -197,6 +197,15 @@ Listed here to make explicit what was considered and intentionally left out:
 - Reading from Microsoft Graph API or an `.ics` URL — would remove the "Outlook must be open at least once" caveat, but adds OAuth/proxy complexity and isn't worth it for v1.
 - Calendar editing from inside app-blocker.
 
-## Open questions
+## Reference notes (existing integration)
 
-- **Where does the existing `win32com.client.gencache` integration code live?** The user has it working elsewhere; the implementation plan needs to reference it (paste, point at file path, or reimplement from scratch). Resolve before writing the implementation plan.
+The user has a working `win32com.client.gencache` reference (provided as a temporary `gencache_example.py` in the repo root, not committed). The implementation plan should mirror its shape with three required changes:
+
+1. **`EnsureDispatch` → `GetActiveObject`.** The example uses `gencache.EnsureDispatch("Outlook.Application")`, which launches Outlook if not running. The new module **must not** launch Outlook (see [Constraints](#constraints)). Switch to `win32com.client.GetActiveObject("Outlook.Application")` and treat its `pywintypes.com_error` raise-on-no-instance as the "Outlook not open" branch.
+2. **Filter by date range, not full scan.** The example iterates the whole calendar with `GetFirst()` / `GetNext()`. For "today's events" use `items.Restrict("[Start] >= '<today 00:00>' AND [Start] < '<tomorrow 00:00>'")` — Outlook's date format is locale-sensitive (e.g. `"05/09/2026 00:00"`), confirm during implementation.
+3. **Read `item.Categories`.** The example doesn't touch this field. The new code keeps only items whose Categories string contains the configured token (see [Data flow](#data-flow), step 2).
+
+The example's other patterns transfer as-is:
+- `items.Sort("[Start]")` then `items.IncludeRecurrences = True` (in this order, before `Restrict`, so recurring Deep Work blocks expand into individual instances).
+- `if item.Class == 26: ...` to narrow to `AppointmentItem` only (skips meetings, contact items, etc.).
+- Wrap each item read in `try/except Exception: pass` for robustness against corrupted or permission-restricted items.
