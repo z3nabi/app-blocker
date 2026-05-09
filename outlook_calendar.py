@@ -78,12 +78,14 @@ def _load_cache(path: Path) -> dict:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return dict(_EMPTY_CACHE, events=[])
-    # Defensive: if the file is missing keys, fall back to defaults.
+    # Defensive: if the file is missing keys or has wrong types, fall back to defaults.
+    raw_events = data.get("events")
+    events = list(raw_events) if isinstance(raw_events, list) else []
     return {
         "lastSyncAt": data.get("lastSyncAt"),
         "lastSyncOk": bool(data.get("lastSyncOk", False)),
         "lastSyncError": data.get("lastSyncError"),
-        "events": list(data.get("events", [])),
+        "events": events,
     }
 
 
@@ -91,6 +93,13 @@ def _save_cache(path: Path, cache: dict) -> None:
     """Atomically write cache to disk (write-temp-then-rename)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=2)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise

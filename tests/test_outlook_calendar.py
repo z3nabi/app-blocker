@@ -135,6 +135,29 @@ class TestCacheIO(unittest.TestCase):
             loaded = outlook_calendar._load_cache(p)
             self.assertEqual(loaded["lastSyncAt"], "second")
 
+    def test_load_partial_keys_uses_defaults(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "partial.json"
+            p.write_text('{"events": []}')
+            cache = outlook_calendar._load_cache(p)
+            self.assertIsNone(cache["lastSyncAt"])
+            self.assertFalse(cache["lastSyncOk"])
+            self.assertIsNone(cache["lastSyncError"])
+
+    def test_load_events_null_returns_empty_events(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "null_events.json"
+            p.write_text('{"events": null}')
+            cache = outlook_calendar._load_cache(p)
+            self.assertEqual(cache["events"], [])
+
+    def test_load_events_non_list_returns_empty_events(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "weird_events.json"
+            p.write_text('{"events": 42}')
+            cache = outlook_calendar._load_cache(p)
+            self.assertEqual(cache["events"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
