@@ -37,3 +37,25 @@ def _event_has_category(categories_field: str | None, target: str) -> bool:
         return False
     tokens = [t.strip() for t in categories_field.split(",")]
     return target in tokens
+
+
+def _event_covers(event: dict, now: datetime) -> bool:
+    """Return True if `now` falls within [event.start, event.end).
+
+    All-day events use [00:00 of start_date, 23:59:59.999999 of (end_date - 1 day)].
+    Outlook represents an all-day event ending on day D as having end=D+1 00:00,
+    so we subtract one second from end to get a closed-on-end-day comparison.
+    """
+    try:
+        start = datetime.fromisoformat(event["start"])
+        end = datetime.fromisoformat(event["end"])
+    except (KeyError, ValueError):
+        return False
+
+    if event.get("isAllDay"):
+        # Outlook all-day events: end is the day AFTER the last covered day at 00:00.
+        # Treat as covering up to (end - 1 microsecond).
+        end = end - timedelta(microseconds=1)
+        return start <= now <= end
+
+    return start <= now < end
