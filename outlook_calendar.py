@@ -28,3 +28,12 @@ try:
     HAVE_WIN32 = True
 except ImportError:
     HAVE_WIN32 = False
+
+
+def _event_has_category(categories_field: str | None, target: str) -> bool:
+    """Return True if `target` appears as a whole token in Outlook's
+    comma-separated Categories string. Case-sensitive."""
+    if not categories_field:
+        return False
+    tokens = [t.strip() for t in categories_field.split(",")]
+    return target in tokens
