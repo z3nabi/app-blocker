@@ -426,7 +426,6 @@ class TestTrySync(unittest.TestCase):
         self.assertEqual(len(outlook_calendar._snapshot_cache()["events"]), 1)
 
 
-import sys
 import time as _time
 
 
@@ -473,36 +472,6 @@ class TestBackgroundSync(unittest.TestCase):
                     interval_seconds=3600, cache_path=cache_path, category="Deep Work")
                 # No exception, only one daemon thread.
                 self.assertTrue(outlook_calendar._is_background_running_for_tests())
-
-
-class TestOutlookProcessCheck(unittest.TestCase):
-    def test_returns_false_on_non_windows(self):
-        # On macOS dev (sys.platform != "win32"), the helper returns False unconditionally.
-        if sys.platform == "win32":
-            self.skipTest("not applicable on Windows")
-        self.assertFalse(outlook_calendar._outlook_process_is_running())
-
-    def test_parses_tasklist_output_when_outlook_present(self):
-        if sys.platform != "win32":
-            # Mock subprocess.check_output to return a tasklist-style line.
-            with patch.object(outlook_calendar.subprocess, "check_output",
-                              return_value='"OUTLOOK.EXE","12345","Console","1","123,456 K"\n'):
-                with patch.object(outlook_calendar.sys, "platform", "win32"):
-                    self.assertTrue(outlook_calendar._outlook_process_is_running())
-
-    def test_returns_false_when_tasklist_returns_no_outlook(self):
-        if sys.platform != "win32":
-            with patch.object(outlook_calendar.subprocess, "check_output",
-                              return_value='INFO: No tasks are running which match the specified criteria.\n'):
-                with patch.object(outlook_calendar.sys, "platform", "win32"):
-                    self.assertFalse(outlook_calendar._outlook_process_is_running())
-
-    def test_returns_false_on_subprocess_error(self):
-        if sys.platform != "win32":
-            with patch.object(outlook_calendar.subprocess, "check_output",
-                              side_effect=OSError("not found")):
-                with patch.object(outlook_calendar.sys, "platform", "win32"):
-                    self.assertFalse(outlook_calendar._outlook_process_is_running())
 
 
 if __name__ == "__main__":

@@ -11,18 +11,15 @@ Reads today's calendar events tagged with the configured category
 caches them in-memory and to disk, and exposes a single function the
 blocker tick loop calls to decide block/unblock.
 
-Never auto-launches Outlook — Outlook itself is a blocked app and
-self-launching it would create a kill/relaunch loop. Uses `Dispatch`
-(not `GetActiveObject`) to work around the COM ROT quirk where Outlook
-doesn't always register itself, but only after verifying OUTLOOK.EXE is
-in the process list.
+Never launches Outlook (uses GetActiveObject, not EnsureDispatch /
+Dispatch) — Outlook itself is a blocked app and self-launching it
+would create a kill/relaunch loop.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -33,25 +30,6 @@ try:
     HAVE_WIN32 = True
 except ImportError:
     HAVE_WIN32 = False
-
-
-def _outlook_process_is_running() -> bool:
-    """True if any OUTLOOK.EXE process exists. Windows-only.
-
-    Used to gate `Dispatch` so we never auto-launch Outlook (Outlook itself
-    is a blocked app — auto-launch would create a kill/relaunch loop).
-    """
-    if sys.platform != "win32":
-        return False
-    try:
-        out = subprocess.check_output(
-            ["tasklist", "/FI", "IMAGENAME eq OUTLOOK.EXE", "/NH", "/FO", "CSV"],
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (subprocess.SubprocessError, OSError):
-        return False
-    return "OUTLOOK.EXE" in out.upper()
 
 
 def _event_has_category(categories_field: str | None, target: str) -> bool:
@@ -168,21 +146,15 @@ class OutlookNotRunning(Exception):
 
 
 def _get_active_outlook():
-    """Return the running Outlook Application via COM, or raise OutlookNotRunning.
+    """Return a running Outlook Application via COM, or raise OutlookNotRunning.
 
-    Strategy: check OUTLOOK.EXE is in the process list, then use `Dispatch`,
-    which attaches to a running Outlook instance (per COM contract) without
-    ever launching a new one — because we already verified one exists. This
-    preserves the "never auto-launch" invariant while working around the fact
-    that Outlook does not always register itself in the COM ROT (which would
-    make `GetActiveObject` fail even when Outlook is open).
+    NEVER uses Dispatch / EnsureDispatch — those auto-launch Outlook, which
+    would create a kill/relaunch loop because Outlook is itself a blocked app.
     """
     if not HAVE_WIN32 or sys.platform != "win32":
         raise OutlookNotRunning()
-    if not _outlook_process_is_running():
-        raise OutlookNotRunning()
     try:
-        return win32com.client.Dispatch("Outlook.Application")
+        return win32com.client.GetActiveObject("Outlook.Application")
     except pywintypes.com_error:
         raise OutlookNotRunning()
 
