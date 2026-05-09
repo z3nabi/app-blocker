@@ -1348,31 +1348,8 @@ def main() -> None:
         font=F("sans", 9, "bold"),
     ).pack(anchor="e", pady=(2, 0))
 
-    focus_card = tk.Frame(
-        today_inner, bg=PAPER,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    focus_card.pack(fill=tk.X, pady=(0, 22))
-    focus_pad = tk.Frame(focus_card, bg=PAPER)
-    focus_pad.pack(fill=tk.X, padx=28, pady=22)
-    tk.Label(
-        focus_pad, text="FOCUS NOW", bg=PAPER, fg=INK3,
-        font=F("sans", 9, "bold"), anchor="w",
-    ).pack(anchor="w")
-    focus_status_var = tk.StringVar(value="Start a session right away.")
-    tk.Label(
-        focus_pad, textvariable=focus_status_var, bg=PAPER, fg=INK,
-        font=F("serif", 18), anchor="w",
-    ).pack(anchor="w", pady=(4, 4))
-    focus_sub_var = tk.StringVar(
-        value="Blocks immediately for the chosen duration. No calendar event needed.")
-    tk.Label(
-        focus_pad, textvariable=focus_sub_var, bg=PAPER, fg=INK2,
-        font=F("sans", 11), anchor="w",
-        wraplength=820, justify="left",
-    ).pack(anchor="w", pady=(0, 14))
-    focus_btn_row = tk.Frame(focus_pad, bg=PAPER)
-    focus_btn_row.pack(fill=tk.X)
+    actions_row = tk.Frame(today_inner, bg=WHITE)
+    actions_row.pack(fill=tk.X, pady=(0, 22))
 
     def start_focus(minutes: int) -> None:
         if killer.manual_focus_window() is not None:
@@ -1392,54 +1369,17 @@ def main() -> None:
         killer.start_manual_focus(minutes)
 
     focus_30_btn = make_button(
-        focus_btn_row, "Focus now · 30 min",
-        lambda: start_focus(30), primary=True,
+        actions_row, "Focus 30 min", lambda: start_focus(30), primary=True,
     )
     focus_30_btn.pack(side=tk.LEFT)
     focus_60_btn = make_button(
-        focus_btn_row, "Focus now · 60 min",
-        lambda: start_focus(60),
+        actions_row, "Focus 60 min", lambda: start_focus(60),
     )
     focus_60_btn.pack(side=tk.LEFT, padx=(10, 0))
-
-    al_card = tk.Frame(
-        today_inner, bg=PAPER,
-        highlightthickness=1, highlightbackground=LINE,
-    )
-    al_card.pack(fill=tk.X, pady=(0, 22))
-    al_pad = tk.Frame(al_card, bg=PAPER)
-    al_pad.pack(fill=tk.X, padx=28, pady=22)
-
-    al_eyebrow_var = tk.StringVar(value="ALLOWANCE BREAK")
-    tk.Label(
-        al_pad, textvariable=al_eyebrow_var, bg=PAPER, fg=INK3,
-        font=F("sans", 9, "bold"), anchor="w",
-    ).pack(anchor="w")
-
-    al_status_var = tk.StringVar(value="")
-    tk.Label(
-        al_pad, textvariable=al_status_var, bg=PAPER, fg=INK,
-        font=F("serif", 18), anchor="w",
-    ).pack(anchor="w", pady=(4, 4))
-
-    al_status_sub_var = tk.StringVar(value="")
-    tk.Label(
-        al_pad, textvariable=al_status_sub_var, bg=PAPER, fg=INK2,
-        font=F("sans", 11), anchor="w",
-        wraplength=820, justify="left",
-    ).pack(anchor="w", pady=(0, 14))
-
-    al_btn_row = tk.Frame(al_pad, bg=PAPER)
-    al_btn_row.pack(fill=tk.X)
     break_btn = make_button(
-        al_btn_row, "Begin allowance break", open_challenge, primary=True,
+        actions_row, "Allowance break", open_challenge,
     )
-    break_btn.pack(side=tk.LEFT)
-    al_meta_var = tk.StringVar(value="")
-    tk.Label(
-        al_btn_row, textvariable=al_meta_var, bg=PAPER, fg=INK3,
-        font=F("mono", 10), padx=14,
-    ).pack(side=tk.LEFT)
+    break_btn.pack(side=tk.LEFT, padx=(10, 0))
 
     stats_grid = tk.Frame(
         today_inner, bg=LINE,
@@ -1896,67 +1836,13 @@ def main() -> None:
             hero_meta_var.set(_summarize_calendar_today(now))
             hero_time_var.set("—")
 
-        s_settings = cfg.get("settings", {}) or {}
-        break_min = int(s_settings.get("breakDurationMinutes", 10))
-        word_count = int(s_settings.get("challengeWordCount", 50))
-        cool_min = int(s_settings.get("cooldownMinutes", 30))
+        ok, _reason = killer.can_take_break()
+        break_btn.config(state=tk.NORMAL if (ok and not ends_at) else tk.DISABLED)
 
-        ok, reason = killer.can_take_break()
-        if ends_at:
-            break_btn.config(state=tk.DISABLED)
-            al_status_var.set("Break in progress.")
-            al_status_sub_var.set(
-                f"Ends at {ends_at.strftime('%H:%M')}.")
-        elif ok:
-            break_btn.config(state=tk.NORMAL)
-            al_status_var.set("Ready when you are.")
-            al_status_sub_var.set(
-                f"Type {word_count} words to start a "
-                f"{break_min}-minute break.")
-        else:
-            break_btn.config(state=tk.DISABLED)
-            al_status_var.set("Not available right now.")
-            al_status_sub_var.set(reason)
-
-        al_eyebrow_var.set(f"ALLOWANCE BREAK · {break_min} MINUTES")
-        al_meta_var.set(
-            f"{break_min} min · {word_count} words · "
-            f"{cool_min} min cooldown"
-        )
-
-        manual_active = bool(window) and window.get("source") == "manual"
-        cal_active = bool(window) and window.get("source") != "manual"
-        if manual_active:
-            try:
-                end_dt = datetime.fromisoformat(window["end"])
-                focus_status_var.set(
-                    f"Focus session in progress · ends {end_dt.strftime('%H:%M')}.")
-            except (KeyError, ValueError):
-                focus_status_var.set("Focus session in progress.")
-            focus_sub_var.set(
-                "Use the allowance break above if you need to step out.")
-            focus_30_btn.config(state=tk.DISABLED)
-            focus_60_btn.config(state=tk.DISABLED)
-        elif cal_active:
-            focus_status_var.set("Deep work block active.")
-            focus_sub_var.set(
-                "A calendar block is already running. "
-                "Manual focus isn't needed right now.")
-            focus_30_btn.config(state=tk.DISABLED)
-            focus_60_btn.config(state=tk.DISABLED)
-        elif ends_at and now < ends_at:
-            focus_status_var.set("Allowance break active.")
-            focus_sub_var.set(
-                "Wait for the break to end before starting a focus session.")
-            focus_30_btn.config(state=tk.DISABLED)
-            focus_60_btn.config(state=tk.DISABLED)
-        else:
-            focus_status_var.set("Start a session right away.")
-            focus_sub_var.set(
-                "Blocks immediately for the chosen duration. "
-                "No calendar event needed.")
-            focus_30_btn.config(state=tk.NORMAL)
-            focus_60_btn.config(state=tk.NORMAL)
+        focus_blocked = bool(window) or bool(ends_at and now < ends_at)
+        focus_state = tk.DISABLED if focus_blocked else tk.NORMAL
+        focus_30_btn.config(state=focus_state)
+        focus_60_btn.config(state=focus_state)
 
         if window:
             sb_label_var.set(
