@@ -1871,7 +1871,7 @@ def main() -> None:
             try:
                 _w_start = datetime.fromisoformat(window["start"]).strftime("%H:%M")
                 _w_end = datetime.fromisoformat(window["end"]).strftime("%H:%M")
-                hero_meta_var.set(f"{_w_start} – {_w_end} · ends at {_w_end}")
+                hero_meta_var.set(f"{_w_start} – {_w_end}")
             except (KeyError, ValueError):
                 hero_meta_var.set(
                     "Focus session · in progress" if is_manual
@@ -1879,6 +1879,11 @@ def main() -> None:
                 )
             try:
                 end_dt = datetime.fromisoformat(window["end"])
+                # Calendar events arrive tz-aware; `now` is naive. Drop tzinfo
+                # so subtraction doesn't raise (same fix pattern as
+                # _summarize_calendar_today, see commit e9074c6).
+                if end_dt.tzinfo is not None:
+                    end_dt = end_dt.replace(tzinfo=None)
                 rem = (end_dt - now).total_seconds()
                 hero_time_var.set(_format_remaining(rem) if rem > 0 else "—")
             except Exception:
