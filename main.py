@@ -23,7 +23,7 @@ import threading
 import time
 import tkinter as tk
 import uuid
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import messagebox, ttk
 import outlook_calendar
@@ -40,8 +40,9 @@ DAY_NAMES = {
 DEFAULT_CONFIG: dict = {
     "_README": (
         "Edit this file to customize. Saved changes are picked up within ~1 second. "
-        "Schedule windows are HH:MM 24h local time. Day keys: mon, tue, wed, thu, fri, sat, sun. "
-        "To block all day, use a single window 00:00-23:59. To never block on a day, use [] for that day."
+        "Blocking is driven by your Outlook calendar: events tagged with the Outlook "
+        "Category specified in calendar.deepWorkCategory (default: 'Deep Work') block "
+        "for the duration of the event. No event tagged → no block."
     ),
     "blockedApps": [
         {
@@ -50,14 +51,9 @@ DEFAULT_CONFIG: dict = {
             "matchers": {"names": ["Notepad", "Notepad.exe", "Calculator"]},
         }
     ],
-    "schedule": {
-        "mon": [{"start": "00:00", "end": "23:59"}],
-        "tue": [{"start": "00:00", "end": "23:59"}],
-        "wed": [{"start": "00:00", "end": "23:59"}],
-        "thu": [{"start": "00:00", "end": "23:59"}],
-        "fri": [{"start": "00:00", "end": "23:59"}],
-        "sat": [{"start": "00:00", "end": "23:59"}],
-        "sun": [{"start": "00:00", "end": "23:59"}],
+    "calendar": {
+        "deepWorkCategory": "Deep Work",
+        "syncIntervalSeconds": 60,
     },
     "settings": {
         "breakDurationMinutes": 10,
@@ -252,29 +248,6 @@ def load_wordlist() -> tuple[list[str], str]:
         if len(words) >= 50:
             return words, f"file: {p}"
     return list(_FALLBACK_WORDS), f"embedded ({len(_FALLBACK_WORDS)} words)"
-
-
-# ---------------------------------------------------------------------------
-# Schedule logic
-# ---------------------------------------------------------------------------
-
-def _parse_hhmm(s: str) -> dt_time:
-    h, m = s.split(":")
-    return dt_time(int(h), int(m))
-
-
-def active_window(now: datetime, schedule: dict) -> dict | None:
-    day_key = DAY_KEYS[now.weekday()]
-    now_t = now.time()
-    for w in schedule.get(day_key, []):
-        try:
-            start = _parse_hhmm(w["start"])
-            end = _parse_hhmm(w["end"])
-        except (KeyError, ValueError):
-            continue
-        if start <= now_t <= end:
-            return w
-    return None
 
 
 def _normalize(name: str) -> str:
