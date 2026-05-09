@@ -103,3 +103,39 @@ def _save_cache(path: Path, cache: dict) -> None:
         except OSError:
             pass
         raise
+
+
+import threading
+
+
+# In-memory cache + lock. Initialized to empty; populated by sync thread on startup.
+_cache_lock = threading.Lock()
+_cache: dict = dict(_EMPTY_CACHE, events=[])
+
+
+def current_deep_work_event(now: datetime) -> dict | None:
+    """Return the first cached event covering `now`, or None.
+
+    This is the function the blocker tick loop calls. It must be cheap
+    (in-memory, no I/O, no COM) and must never raise.
+    """
+    with _cache_lock:
+        events = list(_cache.get("events", []))
+    for event in events:
+        if _event_covers(event, now):
+            return event
+    return None
+
+
+def _reset_for_tests() -> None:
+    """Wipe in-memory cache. Test-only."""
+    global _cache
+    with _cache_lock:
+        _cache = dict(_EMPTY_CACHE, events=[])
+
+
+def _set_cache_for_tests(cache: dict) -> None:
+    """Set in-memory cache. Test-only."""
+    global _cache
+    with _cache_lock:
+        _cache = dict(cache)

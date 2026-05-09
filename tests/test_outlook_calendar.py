@@ -159,5 +159,57 @@ class TestCacheIO(unittest.TestCase):
             self.assertEqual(cache["events"], [])
 
 
+class TestCurrentDeepWorkEvent(unittest.TestCase):
+    def setUp(self):
+        # Reset module state between tests.
+        outlook_calendar._reset_for_tests()
+
+    def test_empty_cache_returns_none(self):
+        self.assertIsNone(outlook_calendar.current_deep_work_event(datetime(2026, 5, 9, 10, 0)))
+
+    def test_event_covering_now_returned(self):
+        outlook_calendar._set_cache_for_tests({
+            "lastSyncAt": "2026-05-09T08:00:00",
+            "lastSyncOk": True,
+            "lastSyncError": None,
+            "events": [
+                {"start": "2026-05-09T09:00:00", "end": "2026-05-09T11:00:00",
+                 "subject": "Focus", "isAllDay": False},
+            ],
+        })
+        result = outlook_calendar.current_deep_work_event(datetime(2026, 5, 9, 10, 0))
+        self.assertIsNotNone(result)
+        self.assertEqual(result["subject"], "Focus")
+
+    def test_no_event_covers_now_returns_none(self):
+        outlook_calendar._set_cache_for_tests({
+            "lastSyncAt": "2026-05-09T08:00:00",
+            "lastSyncOk": True,
+            "lastSyncError": None,
+            "events": [
+                {"start": "2026-05-09T09:00:00", "end": "2026-05-09T11:00:00",
+                 "subject": "Focus", "isAllDay": False},
+            ],
+        })
+        self.assertIsNone(outlook_calendar.current_deep_work_event(datetime(2026, 5, 9, 13, 0)))
+
+    def test_returns_first_matching_when_multiple_overlap(self):
+        # If two Deep Work events overlap (rare but possible), we just return one.
+        outlook_calendar._set_cache_for_tests({
+            "lastSyncAt": "2026-05-09T08:00:00",
+            "lastSyncOk": True,
+            "lastSyncError": None,
+            "events": [
+                {"start": "2026-05-09T09:00:00", "end": "2026-05-09T11:00:00",
+                 "subject": "A", "isAllDay": False},
+                {"start": "2026-05-09T10:00:00", "end": "2026-05-09T12:00:00",
+                 "subject": "B", "isAllDay": False},
+            ],
+        })
+        result = outlook_calendar.current_deep_work_event(datetime(2026, 5, 9, 10, 30))
+        self.assertIsNotNone(result)
+        self.assertIn(result["subject"], ("A", "B"))
+
+
 if __name__ == "__main__":
     unittest.main()
