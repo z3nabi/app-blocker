@@ -12,7 +12,11 @@ Python-script-based implementation that runs via the already-allowlisted `python
 
 ## Run
 
-Requires Python 3.9+ and Git on PATH. No Python dependencies needed.
+Requires Python 3.9+ and Git on PATH.
+
+**On Windows (deploy target):** also install pywin32 — `pip install --user pywin32`. Required for the Outlook calendar integration.
+
+**On macOS (dev only):** no extra dependencies; calendar integration is disabled and the blocker is inactive.
 
 User config and state live in `~/.app-blocker/` (Mac) or `%USERPROFILE%\.app-blocker\` (Windows) — separate from the install dir, so updating code never touches them.
 
@@ -38,6 +42,12 @@ Drop that into a one-line `app-blocker.bat` (Windows) or `app-blocker.sh` (Mac) 
 python "%USERPROFILE%\app-blocker\main.py"     # Windows
 python3 "$HOME/app-blocker/main.py"            # macOS
 ```
+
+## How blocking is scheduled
+
+The blocker reads your Outlook calendar (via local COM, no network). Any event tagged with the Outlook Category "Deep Work" causes the configured apps to be killed for the duration of the event. Untag an event or end it early to lift the block immediately.
+
+You must have Outlook open at least once after the app starts so the calendar can sync; the cache then survives Outlook being killed during a Deep Work block.
 
 ## Optional speedup
 
