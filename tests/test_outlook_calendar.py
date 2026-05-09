@@ -84,6 +84,12 @@ class TestEventCovers(unittest.TestCase):
         ev = self._ev("not-a-date", "2026-05-09T11:00:00")
         self.assertFalse(outlook_calendar._event_covers(ev, datetime(2026, 5, 9, 10, 0, 0)))
 
+    def test_tz_aware_iso_does_not_crash(self):
+        # Outlook can return tz-aware ISO strings depending on store config.
+        # _event_covers must treat them as naive local times, not crash.
+        ev = self._ev("2026-05-09T09:00:00+00:00", "2026-05-09T11:00:00+00:00")
+        self.assertTrue(outlook_calendar._event_covers(ev, datetime(2026, 5, 9, 10, 0, 0)))
+
 
 if __name__ == "__main__":
     unittest.main()

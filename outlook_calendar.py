@@ -44,11 +44,11 @@ def _event_covers(event: dict, now: datetime) -> bool:
 
     All-day events use [00:00 of start_date, 23:59:59.999999 of (end_date - 1 day)].
     Outlook represents an all-day event ending on day D as having end=D+1 00:00,
-    so we subtract one second from end to get a closed-on-end-day comparison.
+    so we subtract one microsecond from end to get a closed-on-end-day comparison.
     """
     try:
-        start = datetime.fromisoformat(event["start"])
-        end = datetime.fromisoformat(event["end"])
+        start = datetime.fromisoformat(event["start"]).replace(tzinfo=None)
+        end = datetime.fromisoformat(event["end"]).replace(tzinfo=None)
     except (KeyError, ValueError):
         return False
 
