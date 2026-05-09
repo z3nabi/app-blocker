@@ -1,4 +1,4 @@
-"""App Blocker — schedule-driven blocker with allowance-break challenge.
+"""App Blocker — Outlook-calendar-driven blocker with allowance-break challenge.
 
 Config:    ~/.app-blocker/config.json   (user-editable; in-app editor too)
 State:     ~/.app-blocker/state.json    (managed by app — current break, last
@@ -31,12 +31,6 @@ import outlook_calendar
 
 TICK_INTERVAL = 1.0
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-DAY_NAMES = {
-    "mon": "Mon", "tue": "Tue", "wed": "Wed", "thu": "Thu",
-    "fri": "Fri", "sat": "Sat", "sun": "Sun",
-}
-
 DEFAULT_CONFIG: dict = {
     "_README": (
         "Edit this file to customize. Saved changes are picked up within ~1 second. "
@@ -481,7 +475,7 @@ class KillerThread(threading.Thread):
     def is_edit_locked(self) -> bool:
         """True if config edits should be gated by a word challenge.
 
-        Edits are locked when a schedule window is active, and *neither*
+        Edits are locked when a calendar event is active, and *neither*
         an allowance break nor an edit-unlock grace window is in effect.
         (A break already cost a challenge — let it cover edits too.)
         """
@@ -1413,7 +1407,7 @@ def main() -> None:
     ).pack(anchor="w", pady=(4, 8))
     tk.Label(
         blocks_inner,
-        text="Killed during scheduled block windows. Edit the JSON config for advanced matchers.",
+        text="Killed during active Deep Work calendar events. Edit the JSON config for advanced matchers.",
         bg=WHITE, fg=INK2, font=F("sans", 11), anchor="w",
         wraplength=720, justify="left",
     ).pack(anchor="w", pady=(0, 22))

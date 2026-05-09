@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 try:
@@ -266,9 +266,6 @@ def _snapshot_cache() -> dict:
     """Return a shallow snapshot of the in-memory cache (private API for the UI)."""
     with _cache_lock:
         return dict(_cache)
-
-
-import time as _time
 
 
 # Sentinel: the daemon thread (or None if not started).
