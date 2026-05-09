@@ -141,6 +141,24 @@ def _set_cache_for_tests(cache: dict) -> None:
         _cache = dict(cache, events=[dict(ev) for ev in cache.get("events", [])])
 
 
+class OutlookNotRunning(Exception):
+    """Raised when GetActiveObject can't find a running Outlook."""
+
+
+def _get_active_outlook():
+    """Return a running Outlook Application via COM, or raise OutlookNotRunning.
+
+    NEVER uses Dispatch / EnsureDispatch — those auto-launch Outlook, which
+    would create a kill/relaunch loop because Outlook is itself a blocked app.
+    """
+    if not HAVE_WIN32 or sys.platform != "win32":
+        raise OutlookNotRunning()
+    try:
+        return win32com.client.GetActiveObject("Outlook.Application")
+    except pywintypes.com_error:
+        raise OutlookNotRunning()
+
+
 def _fetch_today_events_from_outlook(outlook_app, today: date, category: str) -> list[dict]:
     """Read today's calendar events from a running Outlook instance.
 
@@ -187,3 +205,64 @@ def _fetch_today_events_from_outlook(outlook_app, today: date, category: str) ->
             pass
         item = restricted.GetNext()
     return out
+
+
+def _try_sync(cache_path: Path, category: str) -> None:
+    """Attempt one sync. Update in-memory cache + disk on success;
+    update last_sync_status either way. Never raises."""
+    global _cache
+    try:
+        outlook_app = _get_active_outlook()
+    except OutlookNotRunning:
+        _update_status(ok=False, error="Outlook not open")
+        return
+    except Exception as e:
+        _update_status(ok=False, error=f"Sync error: {e}")
+        return
+
+    try:
+        events = _fetch_today_events_from_outlook(outlook_app, date.today(), category)
+    except Exception as e:
+        _update_status(ok=False, error=f"Sync error: {e}")
+        return
+
+    now_iso = datetime.now().replace(microsecond=0).isoformat()
+    new_cache = {
+        "lastSyncAt": now_iso,
+        "lastSyncOk": True,
+        "lastSyncError": None,
+        "events": events,
+    }
+    with _cache_lock:
+        _cache = new_cache
+    try:
+        _save_cache(cache_path, new_cache)
+    except OSError:
+        # Disk write failure is non-fatal — in-memory cache is still updated.
+        pass
+
+
+def _update_status(*, ok: bool, error: str | None) -> None:
+    global _cache
+    now_iso = datetime.now().replace(microsecond=0).isoformat()
+    with _cache_lock:
+        _cache = dict(_cache)
+        _cache["lastSyncAt"] = now_iso
+        _cache["lastSyncOk"] = ok
+        _cache["lastSyncError"] = error
+
+
+def last_sync_status() -> dict:
+    """Public: { 'at': iso_str|None, 'ok': bool, 'error': str|None }."""
+    with _cache_lock:
+        return {
+            "at": _cache.get("lastSyncAt"),
+            "ok": bool(_cache.get("lastSyncOk", False)),
+            "error": _cache.get("lastSyncError"),
+        }
+
+
+def _get_cache_for_tests() -> dict:
+    """Snapshot of in-memory cache. Test-only."""
+    with _cache_lock:
+        return dict(_cache)

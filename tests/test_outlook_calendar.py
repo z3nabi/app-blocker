@@ -337,5 +337,94 @@ class TestFetchTodayEventsFromOutlook(unittest.TestCase):
         self.assertTrue(events[0]["isAllDay"])
 
 
+from unittest.mock import patch
+
+
+class TestTrySync(unittest.TestCase):
+    def setUp(self):
+        outlook_calendar._reset_for_tests()
+
+    def test_successful_sync_updates_cache_and_status(self):
+        # Patch the GetActiveObject lookup so we don't need real win32com.
+        fake_outlook = MagicMock()
+        # Build a calendar that returns one Deep Work event today.
+        ns = MagicMock()
+        fake_outlook.GetNamespace.return_value = ns
+        cal = MagicMock()
+        ns.GetDefaultFolder.return_value = cal
+        items = MagicMock()
+        cal.Items = items
+        restricted = MagicMock()
+        items.Restrict.return_value = restricted
+        appt = MagicMock()
+        appt.Class = 26
+        appt.Subject = "Focus"
+        today = date.today()
+        appt.Start = datetime.combine(today, datetime.min.time()).replace(hour=9)
+        appt.End = datetime.combine(today, datetime.min.time()).replace(hour=11)
+        appt.Categories = "Deep Work"
+        appt.AllDayEvent = False
+        restricted.GetFirst.return_value = appt
+        restricted.GetNext.return_value = None
+
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / "cache.json"
+            with patch.object(outlook_calendar, "_get_active_outlook", return_value=fake_outlook):
+                outlook_calendar._try_sync(cache_path=cache_path, category="Deep Work")
+
+        status = outlook_calendar.last_sync_status()
+        self.assertTrue(status["ok"])
+        self.assertIsNone(status["error"])
+        self.assertIsNotNone(status["at"])
+        self.assertEqual(len(outlook_calendar._get_cache_for_tests()["events"]), 1)
+
+    def test_outlook_not_running_leaves_cache_unchanged(self):
+        # Pre-populate cache with one event.
+        prior = {
+            "lastSyncAt": "2026-05-09T07:00:00",
+            "lastSyncOk": True,
+            "lastSyncError": None,
+            "events": [
+                {"start": "2026-05-09T09:00:00", "end": "2026-05-09T11:00:00",
+                 "subject": "Prior", "isAllDay": False},
+            ],
+        }
+        outlook_calendar._set_cache_for_tests(prior)
+
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / "cache.json"
+            with patch.object(outlook_calendar, "_get_active_outlook",
+                              side_effect=outlook_calendar.OutlookNotRunning):
+                outlook_calendar._try_sync(cache_path=cache_path, category="Deep Work")
+
+        status = outlook_calendar.last_sync_status()
+        self.assertFalse(status["ok"])
+        self.assertEqual(status["error"], "Outlook not open")
+        # Cache is preserved.
+        self.assertEqual(len(outlook_calendar._get_cache_for_tests()["events"]), 1)
+        self.assertEqual(outlook_calendar._get_cache_for_tests()["events"][0]["subject"], "Prior")
+
+    def test_arbitrary_com_failure_leaves_cache_unchanged(self):
+        prior = {
+            "lastSyncAt": "2026-05-09T07:00:00",
+            "lastSyncOk": True,
+            "lastSyncError": None,
+            "events": [{"start": "2026-05-09T09:00:00", "end": "2026-05-09T11:00:00",
+                        "subject": "Prior", "isAllDay": False}],
+        }
+        outlook_calendar._set_cache_for_tests(prior)
+
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / "cache.json"
+            with patch.object(outlook_calendar, "_get_active_outlook",
+                              side_effect=RuntimeError("calendar locked")):
+                outlook_calendar._try_sync(cache_path=cache_path, category="Deep Work")
+
+        status = outlook_calendar.last_sync_status()
+        self.assertFalse(status["ok"])
+        self.assertIn("calendar locked", status["error"])
+        self.assertEqual(len(outlook_calendar._get_cache_for_tests()["events"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
