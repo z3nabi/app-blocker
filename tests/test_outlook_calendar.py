@@ -308,11 +308,22 @@ class TestFetchTodayEventsFromOutlook(unittest.TestCase):
         outlook_calendar._fetch_today_events_from_outlook(
             outlook, date(2026, 5, 9), "Deep Work")
         # Spec: Sort "[Start]" → IncludeRecurrences = True → Restrict(...).
+        # Verify presence AND order via mock_calls.
         items_collection = outlook.GetNamespace.return_value.GetDefaultFolder.return_value.Items
         items_collection.Sort.assert_called_once_with("[Start]")
-        # IncludeRecurrences set via attribute assignment — verify property was set.
         self.assertEqual(items_collection.IncludeRecurrences, True)
         items_collection.Restrict.assert_called_once()
+
+        # Order check: walk mock_calls and find the indices.
+        names_in_order = [c[0] for c in items_collection.mock_calls]
+        # mock_calls records attribute reads/sets too; we look for the three operations.
+        # Sort and Restrict appear by method name; setting IncludeRecurrences appears
+        # under the empty-string method (a property-set marker varies by mock version).
+        # The robust check: verify Sort comes before Restrict.
+        sort_idx = names_in_order.index("Sort")
+        restrict_idx = names_in_order.index("Restrict")
+        self.assertLess(sort_idx, restrict_idx,
+                        f"Sort must be called before Restrict; got order: {names_in_order}")
 
     def test_all_day_event_marked(self):
         outlook = self._make_outlook([
