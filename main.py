@@ -26,6 +26,7 @@ import uuid
 from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
 from tkinter import messagebox, ttk
+import outlook_calendar
 
 
 TICK_INTERVAL = 1.0
@@ -539,7 +540,7 @@ class KillerThread(threading.Thread):
             self._reload_config()
 
             now = datetime.now()
-            window = active_window(now, self._config.get("schedule", {}))
+            window = outlook_calendar.current_deep_work_event(now)
 
             # Lazily expire any active break (writes lastBreakEndedAt on expiry).
             break_active = self.is_break_active()
@@ -1951,19 +1952,16 @@ def main() -> None:
             pill_dot.config(bg=ACCENT)
             pill_label.config(fg=ACCENT)
             hero_session_var.set("Deep work")
-            hero_meta_var.set(
-                f"{window.get('start','?')} – {window.get('end','?')} · "
-                f"ends at {window.get('end','?')}"
-            )
             try:
-                eh, em = map(int, window["end"].split(":"))
-                end_dt = now.replace(
-                    hour=eh, minute=em, second=0, microsecond=0,
-                )
-                if end_dt < now:
-                    end_dt += timedelta(days=1)
+                _w_start = datetime.fromisoformat(window["start"]).strftime("%H:%M")
+                _w_end = datetime.fromisoformat(window["end"]).strftime("%H:%M")
+                hero_meta_var.set(f"{_w_start} – {_w_end} · ends at {_w_end}")
+            except (KeyError, ValueError):
+                hero_meta_var.set("Deep work · in progress")
+            try:
+                end_dt = datetime.fromisoformat(window["end"])
                 rem = (end_dt - now).total_seconds()
-                hero_time_var.set(_format_remaining(rem))
+                hero_time_var.set(_format_remaining(rem) if rem > 0 else "—")
             except Exception:
                 hero_time_var.set("—")
         else:
@@ -2123,6 +2121,11 @@ def main() -> None:
 
         root.after(500, refresh)
 
+    _startup_cfg = killer.snapshot()["config"]
+    outlook_calendar.start_background_sync(
+        interval_seconds=int(_startup_cfg.get("calendar", {}).get("syncIntervalSeconds", 60)),
+        category=str(_startup_cfg.get("calendar", {}).get("deepWorkCategory", "Deep Work")),
+    )
     refresh()
     root.mainloop()
 
