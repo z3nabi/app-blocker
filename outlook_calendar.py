@@ -123,7 +123,7 @@ def current_deep_work_event(now: datetime) -> dict | None:
         events = list(_cache.get("events", []))
     for event in events:
         if _event_covers(event, now):
-            return event
+            return dict(event)
     return None
 
 
@@ -135,7 +135,7 @@ def _reset_for_tests() -> None:
 
 
 def _set_cache_for_tests(cache: dict) -> None:
-    """Set in-memory cache. Test-only."""
+    """Set in-memory cache. Test-only. Deep-copies events list to avoid aliasing."""
     global _cache
     with _cache_lock:
-        _cache = dict(cache)
+        _cache = dict(cache, events=[dict(ev) for ev in cache.get("events", [])])
