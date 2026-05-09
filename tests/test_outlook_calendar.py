@@ -346,6 +346,107 @@ class TestFetchTodayEventsFromOutlook(unittest.TestCase):
         self.assertTrue(events[0]["isAllDay"])
 
 
+class TestAdditionalCalendars(unittest.TestCase):
+    """Multi-calendar fetch: union events from default + named extras."""
+
+    def _make_folder(self, *, name, items):
+        folder = MagicMock()
+        folder.Name = name
+        coll = MagicMock()
+        folder.Items = coll
+        restricted = MagicMock()
+        coll.Restrict.return_value = restricted
+        seq = list(items)
+        idx = {"i": 0}
+
+        def gf():
+            idx["i"] = 0
+            return seq[0] if seq else None
+
+        def gn():
+            idx["i"] += 1
+            return seq[idx["i"]] if idx["i"] < len(seq) else None
+
+        restricted.GetFirst.side_effect = gf
+        restricted.GetNext.side_effect = gn
+        return folder
+
+    def _make_appointment(self, *, subject, categories="Deep Work", klass=26):
+        item = MagicMock()
+        item.Class = klass
+        item.Subject = subject
+        item.Start = datetime(2026, 5, 9, 9, 0)
+        item.End = datetime(2026, 5, 9, 10, 0)
+        item.Categories = categories
+        item.AllDayEvent = False
+        return item
+
+    def _make_outlook(self, *, default_items, subfolders=None):
+        """Wire up: default calendar with subfolders. Parent siblings = [default]."""
+        subfolders = subfolders or {}
+        outlook = MagicMock()
+        ns = MagicMock()
+        outlook.GetNamespace.return_value = ns
+        default = self._make_folder(name="Calendar", items=default_items)
+        sub_list = [
+            self._make_folder(name=name, items=items)
+            for name, items in subfolders.items()
+        ]
+        default.Folders = sub_list
+        parent = MagicMock()
+        parent.Folders = [default]
+        default.Parent = parent
+        ns.GetDefaultFolder.return_value = default
+        return outlook, default, sub_list
+
+    def test_unions_events_from_named_subfolder(self):
+        outlook, _default, _ = self._make_outlook(
+            default_items=[self._make_appointment(subject="Focus")],
+            subfolders={
+                "Work Blocks": [self._make_appointment(subject="Block A")],
+            },
+        )
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work",
+            additional_calendars=["Work Blocks"],
+        )
+        subjects = sorted(e["subject"] for e in events)
+        self.assertEqual(subjects, ["Block A", "Focus"])
+
+    def test_additional_calendar_match_is_case_insensitive(self):
+        outlook, _default, _ = self._make_outlook(
+            default_items=[],
+            subfolders={"Work Blocks": [self._make_appointment(subject="Block A")]},
+        )
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work",
+            additional_calendars=["work blocks"],
+        )
+        self.assertEqual([e["subject"] for e in events], ["Block A"])
+
+    def test_missing_additional_calendar_silently_skipped(self):
+        outlook, _default, _ = self._make_outlook(
+            default_items=[self._make_appointment(subject="Focus")],
+            subfolders={},
+        )
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work",
+            additional_calendars=["Nonexistent"],
+        )
+        self.assertEqual([e["subject"] for e in events], ["Focus"])
+
+    def test_empty_additional_list_unchanged_from_default(self):
+        outlook, _default, _ = self._make_outlook(
+            default_items=[self._make_appointment(subject="Focus")],
+            subfolders={"Work Blocks": [self._make_appointment(subject="Block A")]},
+        )
+        events = outlook_calendar._fetch_today_events_from_outlook(
+            outlook, date(2026, 5, 9), "Deep Work",
+        )
+        # Without additional_calendars, only default is scanned.
+        self.assertEqual([e["subject"] for e in events], ["Focus"])
+
+
 from unittest.mock import patch
 
 
@@ -450,7 +551,7 @@ class TestBackgroundSync(unittest.TestCase):
     def test_force_refresh_triggers_sync(self):
         call_count = {"n": 0}
 
-        def fake_sync(cache_path, category):
+        def fake_sync(cache_path, category, *, additional_calendars=()):
             call_count["n"] += 1
 
         with patch.object(outlook_calendar, "_try_sync", side_effect=fake_sync):

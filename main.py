@@ -37,7 +37,9 @@ DEFAULT_CONFIG: dict = {
         "Edit this file to customize. Saved changes are picked up within ~1 second. "
         "Blocking is driven by your Outlook calendar: events tagged with the Outlook "
         "Category specified in calendar.deepWorkCategory (default: 'Deep Work') block "
-        "for the duration of the event. No event tagged → no block."
+        "for the duration of the event. No event tagged → no block. "
+        "Add names to calendar.additionalCalendars to also scan secondary Outlook "
+        "calendars (e.g. ['Work Blocks'])."
     ),
     "blockedApps": [
         {
@@ -49,6 +51,10 @@ DEFAULT_CONFIG: dict = {
     "calendar": {
         "deepWorkCategory": "Deep Work",
         "syncIntervalSeconds": 60,
+        # Names of secondary Outlook calendars to also scan (in addition to the
+        # default). Use the exact display name as it appears in Outlook's
+        # folder pane, e.g. ["Work Blocks"]. Missing names are skipped silently.
+        "additionalCalendars": [],
     },
     "settings": {
         "breakDurationMinutes": 10,
@@ -2047,9 +2053,14 @@ def main() -> None:
         root.after(500, refresh)
 
     _startup_cfg = killer.snapshot()["config"]
+    _cal_cfg = _startup_cfg.get("calendar", {})
+    _additional = _cal_cfg.get("additionalCalendars", []) or []
+    if not isinstance(_additional, list):
+        _additional = []
     outlook_calendar.start_background_sync(
-        interval_seconds=int(_startup_cfg.get("calendar", {}).get("syncIntervalSeconds", 60)),
-        category=str(_startup_cfg.get("calendar", {}).get("deepWorkCategory", "Deep Work")),
+        interval_seconds=int(_cal_cfg.get("syncIntervalSeconds", 60)),
+        category=str(_cal_cfg.get("deepWorkCategory", "Deep Work")),
+        additional_calendars=[str(n) for n in _additional if str(n).strip()],
     )
     refresh()
     root.mainloop()

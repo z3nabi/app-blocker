@@ -49,6 +49,18 @@ The blocker reads your Outlook calendar (via local COM, no network). Any event t
 
 You must have Outlook open at least once after the app starts so the calendar can sync; the cache then survives Outlook being killed during a Deep Work block.
 
+By default only your primary calendar is scanned. To also pick up secondary calendars (e.g. a private "Work Blocks" calendar your colleagues don't see), add their display names to `calendar.additionalCalendars` in `~/.app-blocker/config.json`:
+
+```json
+"calendar": {
+  "deepWorkCategory": "Deep Work",
+  "syncIntervalSeconds": 60,
+  "additionalCalendars": ["Work Blocks"]
+}
+```
+
+Names are matched case-insensitively against subfolders of your default Calendar and siblings at the mailbox root. Unknown names are ignored silently.
+
 ## Optional speedup
 
 ```
