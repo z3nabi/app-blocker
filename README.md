@@ -12,19 +12,27 @@ Python-script-based implementation that runs via the already-allowlisted `python
 
 ## Run
 
-Requires Python 3.9+. No dependencies needed.
+Requires Python 3.9+ and Git on PATH. No Python dependencies needed.
 
-### Update-and-run launcher
+User config and state live in `~/.app-blocker/` (Mac) or `%USERPROFILE%\.app-blocker\` (Windows) — separate from the install dir, so updating code never touches them.
 
-Each launch pulls the latest from GitHub before running. If the download fails (e.g. corp proxy), it errors out loudly — no silent fallback to stale code.
+### One-time install
 
-**Windows:** save [update-and-run.bat](https://raw.githubusercontent.com/z3nabi/app-blocker/main/update-and-run.bat) anywhere (e.g. Desktop), double-click to launch.
+```
+git clone https://github.com/z3nabi/app-blocker.git "%USERPROFILE%\app-blocker"   # Windows
+git clone https://github.com/z3nabi/app-blocker.git "$HOME/app-blocker"           # macOS
+```
 
-**macOS/Linux:** save [update-and-run.sh](https://raw.githubusercontent.com/z3nabi/app-blocker/main/update-and-run.sh), `chmod +x update-and-run.sh`, then `./update-and-run.sh`.
+### Launch (with update)
 
-### Run last install (no update)
+```
+cd /d "%USERPROFILE%\app-blocker" && git pull && python main.py        # Windows
+cd "$HOME/app-blocker" && git pull && python3 main.py                  # macOS
+```
 
-After the launcher has run at least once, the code lives at `~/app-blocker/` (Mac) or `%USERPROFILE%\app-blocker\` (Windows). Run it directly to skip the download:
+Drop that into a one-line `app-blocker.bat` (Windows) or `app-blocker.sh` (Mac) on your Desktop and double-click.
+
+### Launch without updating
 
 ```
 python "%USERPROFILE%\app-blocker\main.py"     # Windows
