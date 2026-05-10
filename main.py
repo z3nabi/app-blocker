@@ -722,12 +722,28 @@ class ChallengeModal:
         self.entry.bind("<Button-1>", lambda e: _ctrace(
             f"entry: Button-1 click, focus_get={self.win.focus_get()!r}"))
         self.entry.focus_set()
-        # Snapshot focus right after focus_set, then again after Tk has a tick
-        # to actually map the modal — focus_set() before the Toplevel is
-        # mapped is queued, so the immediate read may not reflect reality.
         _ctrace(f"after focus_set: focus_get={self.win.focus_get()!r}")
-        self.win.after(100, lambda: _ctrace(
-            f"100ms post-mount: focus_get={self.win.focus_get()!r}, "
+
+        # Defensive: focus_set() is a Tk-internal hint that only takes effect
+        # once the Toplevel is the foreground window. We observed
+        # parent.focus_get() still returning root after focus_set, meaning
+        # the OS kept focus on the parent. Escalate to OS-level focus once
+        # the modal has had a tick to be mapped.
+        def _force_focus():
+            try:
+                self.win.lift()
+                self.win.focus_force()
+                self.entry.focus_force()
+            except tk.TclError:
+                return
+            _ctrace(
+                f"after force_focus: focus_get={self.win.focus_get()!r}, "
+                f"grab_status={self.win.grab_status()!r}"
+            )
+
+        self.win.after(50, _force_focus)
+        self.win.after(200, lambda: _ctrace(
+            f"200ms post-mount: focus_get={self.win.focus_get()!r}, "
             f"grab_status={self.win.grab_status()!r}, "
             f"target_word={self.words[self.idx]!r}"))
 
