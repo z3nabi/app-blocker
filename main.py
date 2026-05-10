@@ -676,15 +676,30 @@ class ChallengeModal:
         tk.Label(prog_row, textvariable=self.progress_var, bg=WHITE, fg=INK2,
                  font=F("mono", 11)).pack(side=tk.RIGHT)
 
+        # Bottom-anchored widgets first so they can never be squeezed off the
+        # screen by an over-tall middle widget. Pack order matters with
+        # side=BOTTOM: the first call gets the very bottom slot.
+        foot = tk.Frame(outer, bg=WHITE)
+        foot.pack(side=tk.BOTTOM, fill=tk.X, pady=(14, 0))
+
+        input_row = tk.Frame(outer, bg=WHITE,
+                             highlightthickness=1, highlightbackground=INK)
+        input_row.pack(side=tk.BOTTOM, fill=tk.X)
+
         word_card = tk.Frame(outer, bg=PAPER,
                              highlightthickness=1, highlightbackground=LINE)
-        word_card.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
+        word_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 14))
+        # height in lines — without this tk.Text defaults to 24, requesting
+        # ~528px of vertical space which overflows the 540px modal and clips
+        # the input row + Cancel button below it (Entry winds up unmapped,
+        # so focus_force on it silently no-ops).
         self.text = tk.Text(
             word_card, wrap=tk.WORD,
             font=(_FONT_CACHE["serif"], 16),
             bg=PAPER, fg=INK2, padx=28, pady=24,
             relief="flat", borderwidth=0, highlightthickness=0,
             spacing1=4, spacing3=4,
+            height=8,
         )
         self.text.pack(fill=tk.BOTH, expand=True)
         self.text.tag_configure("done", foreground=INK3)
@@ -695,10 +710,6 @@ class ChallengeModal:
         self.text.tag_configure("pending", foreground=INK2)
         self._render_words()
         self.text.config(state=tk.DISABLED)
-
-        input_row = tk.Frame(outer, bg=WHITE,
-                             highlightthickness=1, highlightbackground=INK)
-        input_row.pack(fill=tk.X)
         input_pad = tk.Frame(input_row, bg=WHITE)
         input_pad.pack(fill=tk.X, padx=18, pady=14)
         tk.Label(input_pad, text="WORD", bg=WHITE, fg=INK3,
@@ -757,8 +768,6 @@ class ChallengeModal:
             f"grab_status={self.win.grab_status()!r}, "
             f"target_word={self.words[self.idx]!r}"))
 
-        foot = tk.Frame(outer, bg=WHITE)
-        foot.pack(fill=tk.X, pady=(14, 0))
         tk.Button(
             foot, text="Cancel", command=self._cancel,
             bg=WHITE, fg=INK2, activebackground=PAPER_ALT,
