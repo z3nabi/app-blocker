@@ -1178,44 +1178,27 @@ def main() -> None:
     root.protocol("WM_DELETE_WINDOW", on_close)
     root.bind("<Unmap>", on_unmap)
 
-    def make_button(parent, text, command, *, primary: bool = False) -> tk.Button:
-        bg = INK if primary else WHITE
-        fg = WHITE if primary else INK
-        active_bg = INK2 if primary else PAPER_ALT
-        bd_color = INK if primary else INK2
-        btn = tk.Button(
+    def make_button(parent, text, command) -> tk.Button:
+        return tk.Button(
             parent, text=text, command=command,
-            bg=bg, fg=fg, activebackground=active_bg, activeforeground=fg,
+            bg=INK, fg=WHITE, activebackground=INK2, activeforeground=WHITE,
             disabledforeground=INK3,
             font=F("sans", 10), padx=18, pady=8,
             relief="flat", borderwidth=0,
-            highlightthickness=1, highlightbackground=bd_color,
+            highlightthickness=1, highlightbackground=INK,
             cursor="hand2",
         )
-        btn._sw_primary = primary  # type: ignore[attr-defined]
-        return btn
 
     def set_button_enabled(btn: tk.Button, enabled: bool) -> None:
         """Toggle visual + interactive state. tk.Button's default disabled
-        rendering only dims the foreground, which is too subtle on this
-        palette — we also flip background, border, and cursor."""
-        primary = getattr(btn, "_sw_primary", False)
+        rendering only dims the foreground; we also flip bg/border/cursor
+        so the difference is unmistakable on this palette."""
         if enabled:
-            btn.config(
-                state=tk.NORMAL,
-                bg=INK if primary else WHITE,
-                fg=WHITE if primary else INK,
-                highlightbackground=INK if primary else INK2,
-                cursor="hand2",
-            )
+            btn.config(state=tk.NORMAL, bg=INK, fg=WHITE,
+                       highlightbackground=INK, cursor="hand2")
         else:
-            btn.config(
-                state=tk.DISABLED,
-                bg=PAPER,
-                fg=INK3,
-                highlightbackground=LINE,
-                cursor="arrow",
-            )
+            btn.config(state=tk.DISABLED, bg=PAPER, fg=INK3,
+                       highlightbackground=LINE, cursor="arrow")
 
     def _challenge_word_count() -> int:
         n = int(killer._settings().get("challengeWordCount", 50))
@@ -1439,17 +1422,24 @@ def main() -> None:
         killer.start_manual_focus(minutes)
 
     focus_30_btn = make_button(
-        actions_inner, "Focus 30 min", lambda: start_focus(30), primary=True,
+        actions_inner, "Focus 30 min", lambda: start_focus(30),
     )
-    focus_30_btn.pack(side=tk.LEFT, padx=4)
+    focus_30_btn.pack(side=tk.LEFT)
     focus_60_btn = make_button(
         actions_inner, "Focus 60 min", lambda: start_focus(60),
     )
-    focus_60_btn.pack(side=tk.LEFT, padx=4)
+    # Tight pair, then a wider gap before the conceptually-distinct allowance.
+    focus_60_btn.pack(side=tk.LEFT, padx=(6, 28))
     break_btn = make_button(
         actions_inner, "Allowance break", open_challenge,
     )
-    break_btn.pack(side=tk.LEFT, padx=4)
+    break_btn.pack(side=tk.LEFT)
+
+    allowance_caption_var = tk.StringVar(value="")
+    tk.Label(
+        actions_row, textvariable=allowance_caption_var, bg=WHITE, fg=INK3,
+        font=F("sans", 10),
+    ).pack(pady=(8, 0))
 
     stats_grid = tk.Frame(
         today_inner, bg=LINE,
@@ -1908,6 +1898,13 @@ def main() -> None:
 
         ok, _reason = killer.can_take_break()
         set_button_enabled(break_btn, ok and not ends_at)
+
+        cd_remaining = killer.cooldown_remaining_seconds()
+        if cd_remaining > 0 and not ends_at:
+            allowance_caption_var.set(
+                f"Allowance available in {_format_remaining(cd_remaining)}")
+        else:
+            allowance_caption_var.set("")
 
         focus_blocked = bool(window) or bool(ends_at and now < ends_at)
         set_button_enabled(focus_30_btn, not focus_blocked)
