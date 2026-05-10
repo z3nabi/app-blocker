@@ -731,10 +731,20 @@ class ChallengeModal:
         # the modal has had a tick to be mapped.
         def _force_focus():
             try:
+                _ctrace(
+                    f"entry probe: exists={self.entry.winfo_exists()} "
+                    f"ismapped={self.entry.winfo_ismapped()} "
+                    f"viewable={self.entry.winfo_viewable()} "
+                    f"takefocus={self.entry.cget('takefocus')!r} "
+                    f"state={self.entry.cget('state')!r} "
+                    f"path={str(self.entry)!r}"
+                )
                 self.win.lift()
                 self.win.focus_force()
                 self.entry.focus_force()
-            except tk.TclError:
+                self.entry.focus_set()
+            except tk.TclError as e:
+                _ctrace(f"force_focus TclError: {e}")
                 return
             _ctrace(
                 f"after force_focus: focus_get={self.win.focus_get()!r}, "
