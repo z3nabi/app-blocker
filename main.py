@@ -618,29 +618,12 @@ class KillerThread(threading.Thread):
 # Word challenge modal
 # ---------------------------------------------------------------------------
 
-_CHALLENGE_TRACE_ENABLED = os.environ.get("APP_BLOCKER_CHALLENGE_TRACE", "1") != "0"
-
-
-def _ctrace(msg: str) -> None:
-    """Diagnostic for the allowance challenge — set APP_BLOCKER_CHALLENGE_TRACE=0 to silence."""
-    if _CHALLENGE_TRACE_ENABLED:
-        try:
-            print(f"[challenge] {msg}", file=sys.stderr, flush=True)
-        except Exception:
-            pass
-
-
 class ChallengeModal:
     def __init__(self, parent: tk.Tk, words: list[str], on_complete) -> None:
         self.words = words
         self.idx = 0
         self.on_complete = on_complete
         self._completed = False
-
-        _ctrace(
-            f"open: {len(words)} words, parent_state={parent.state()!r}, "
-            f"current_focus={parent.focus_get()!r}"
-        )
 
         self.win = tk.Toplevel(parent)
         self.win.title("Allowance break — type to unlock")
@@ -649,7 +632,6 @@ class ChallengeModal:
         self.win.transient(parent)
         self.win.grab_set()
         self.win.protocol("WM_DELETE_WINDOW", self._cancel)
-        _ctrace(f"after grab_set: grab_status={self.win.grab_status()!r}")
 
         outer = tk.Frame(self.win, bg=WHITE)
         outer.pack(fill=tk.BOTH, expand=True, padx=44, pady=32)
@@ -727,46 +709,7 @@ class ChallengeModal:
         self.entry.bind("<space>", self._on_separator)
         self.entry.bind("<Return>", self._on_separator)
         self.entry.bind("<KeyRelease>", self._on_keyrelease)
-        self.entry.bind("<KeyPress>", self._on_keypress_trace)
-        self.entry.bind("<FocusIn>", lambda e: _ctrace("entry: FocusIn"))
-        self.entry.bind("<FocusOut>", lambda e: _ctrace("entry: FocusOut"))
-        self.entry.bind("<Button-1>", lambda e: _ctrace(
-            f"entry: Button-1 click, focus_get={self.win.focus_get()!r}"))
         self.entry.focus_set()
-        _ctrace(f"after focus_set: focus_get={self.win.focus_get()!r}")
-
-        # Defensive: focus_set() is a Tk-internal hint that only takes effect
-        # once the Toplevel is the foreground window. We observed
-        # parent.focus_get() still returning root after focus_set, meaning
-        # the OS kept focus on the parent. Escalate to OS-level focus once
-        # the modal has had a tick to be mapped.
-        def _force_focus():
-            try:
-                _ctrace(
-                    f"entry probe: exists={self.entry.winfo_exists()} "
-                    f"ismapped={self.entry.winfo_ismapped()} "
-                    f"viewable={self.entry.winfo_viewable()} "
-                    f"takefocus={self.entry.cget('takefocus')!r} "
-                    f"state={self.entry.cget('state')!r} "
-                    f"path={str(self.entry)!r}"
-                )
-                self.win.lift()
-                self.win.focus_force()
-                self.entry.focus_force()
-                self.entry.focus_set()
-            except tk.TclError as e:
-                _ctrace(f"force_focus TclError: {e}")
-                return
-            _ctrace(
-                f"after force_focus: focus_get={self.win.focus_get()!r}, "
-                f"grab_status={self.win.grab_status()!r}"
-            )
-
-        self.win.after(50, _force_focus)
-        self.win.after(200, lambda: _ctrace(
-            f"200ms post-mount: focus_get={self.win.focus_get()!r}, "
-            f"grab_status={self.win.grab_status()!r}, "
-            f"target_word={self.words[self.idx]!r}"))
 
         tk.Button(
             foot, text="Cancel", command=self._cancel,
@@ -830,14 +773,6 @@ class ChallengeModal:
         self.entry.config(foreground=WARN)
         self.entry.after(160, lambda: self.entry.config(foreground=INK))
 
-    def _on_keypress_trace(self, event):
-        # Diagnostic only — does NOT consume the event (returns None).
-        _ctrace(
-            f"KeyPress: keysym={event.keysym} char={event.char!r} "
-            f"keycode={event.keycode} state={event.state} "
-            f"entry_text={self.entry.get()!r} idx={self.idx}"
-        )
-
     def _on_keyrelease(self, event):
         if event.keysym in ("space", "Return", "BackSpace", "Delete", "Left", "Right",
                             "Home", "End", "Tab", "Shift_L", "Shift_R", "Caps_Lock"):
@@ -849,10 +784,6 @@ class ChallengeModal:
             return
         target = self.words[self.idx].lower()
         if not target.startswith(typed.lower()):
-            _ctrace(
-                f"validator clear: typed={typed!r} target={target!r} "
-                f"keysym={event.keysym}"
-            )
             self.entry.delete(0, tk.END)
             self._flash_red()
 
