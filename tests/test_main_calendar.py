@@ -1,4 +1,4 @@
-"""Tests for the calendar-summary helpers in main.py.
+"""Tests for the calendar-summary helpers in summaries.py.
 
 Specifically: `_summarize_calendar_today` must tolerate timezone-aware
 ISO strings in the cache. pywintypes emits tz-aware datetimes for Outlook
@@ -12,11 +12,11 @@ import os
 import unittest
 from datetime import datetime
 
-# Silence module trace output BEFORE importing outlook_calendar / main.
+# Silence module trace output BEFORE importing outlook_calendar / summaries.
 os.environ["OUTLOOK_CALENDAR_TRACE"] = "0"
 
 import outlook_calendar  # noqa: E402
-import main  # noqa: E402
+import summaries  # noqa: E402
 
 outlook_calendar._TRACE_ENABLED = False
 
@@ -38,7 +38,7 @@ class TestSummarizeCalendarToday(unittest.TestCase):
             }],
         })
         naive_now = datetime(2026, 5, 9, 10, 0, 0)
-        result = main._summarize_calendar_today(naive_now)
+        result = summaries._summarize_calendar_today(naive_now)
         self.assertIn("15:00", result)
 
     def test_current_block_with_tz_aware_cached_event(self):
@@ -51,14 +51,14 @@ class TestSummarizeCalendarToday(unittest.TestCase):
             }],
         })
         naive_now = datetime(2026, 5, 9, 10, 0, 0)
-        result = main._summarize_calendar_today(naive_now)
+        result = summaries._summarize_calendar_today(naive_now)
         self.assertIn("11:00", result)
 
     def test_no_blocks_today_returns_placeholder(self):
         outlook_calendar._set_cache_for_tests({"events": []})
         naive_now = datetime(2026, 5, 9, 10, 0, 0)
         self.assertEqual(
-            main._summarize_calendar_today(naive_now),
+            summaries._summarize_calendar_today(naive_now),
             "No deep work blocks today",
         )
 
