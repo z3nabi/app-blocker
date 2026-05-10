@@ -13,24 +13,29 @@ Run:
 from __future__ import annotations
 
 import json
-import os
 import platform
 import random
-import signal
-import subprocess
 import sys
-import threading
 import time
 import tkinter as tk
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
+
 import outlook_calendar
 import tray
+from app_picker import AppPicker
+from autostart import (
+    install_launch_at_login,
+    is_launch_at_login_installed,
+    uninstall_launch_at_login,
+)
+from challenge import ChallengeModal
+from killer import KillerThread
+from paths import config_path, load_or_create_config, save_config, state_path
 from style import (
     ACCENT,
-    ACCENT_SOFT,
     F,
     INK,
     INK2,
@@ -44,40 +49,8 @@ from style import (
     _FONT_CACHE,
     init_fonts,
 )
-from paths import (
-    DEFAULT_CONFIG,
-    DEFAULT_STATE,
-    EDIT_UNLOCK_MINUTES,
-    app_data_dir,
-    config_path,
-    load_or_create_config,
-    load_state,
-    save_config,
-    save_state,
-    state_path,
-    words_path,
-)
+from summaries import _format_remaining, _summarize_calendar_today
 from wordlist import load_wordlist
-from processes import (
-    CREATE_NO_WINDOW,
-    _normalize,
-    collect_blocked_normalized,
-    kill_pid,
-    list_processes,
-)
-from killer import KillerThread
-from challenge import ChallengeModal
-from app_picker import AppPicker
-from autostart import (
-    install_launch_at_login,
-    is_launch_at_login_installed,
-    uninstall_launch_at_login,
-)
-from summaries import (
-    _format_remaining,
-    _summarize_blocked,
-    _summarize_calendar_today,
-)
 
 
 # ---------------------------------------------------------------------------
