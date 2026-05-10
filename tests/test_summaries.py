@@ -63,5 +63,58 @@ class TestSummarizeCalendarToday(unittest.TestCase):
         )
 
 
+class TestSummarizeBlocked(unittest.TestCase):
+    def test_with_apps(self):
+        cfg = {
+            "blockedApps": [
+                {"matchers": {"names": ["Notepad", "Notepad.exe"]}},
+                {"matchers": {"names": ["Calculator"]}},
+            ]
+        }
+        self.assertEqual(
+            summaries._summarize_blocked(cfg),
+            "Notepad, Notepad.exe, Calculator",
+        )
+
+    def test_empty(self):
+        self.assertEqual(
+            summaries._summarize_blocked({"blockedApps": []}),
+            "(no apps configured)",
+        )
+
+    def test_missing_key(self):
+        self.assertEqual(
+            summaries._summarize_blocked({}),
+            "(no apps configured)",
+        )
+
+    def test_apps_without_names(self):
+        cfg = {"blockedApps": [{"matchers": {}}]}
+        self.assertEqual(
+            summaries._summarize_blocked(cfg),
+            "(no matchers)",
+        )
+
+
+class TestFormatRemaining(unittest.TestCase):
+    def test_zero(self):
+        self.assertEqual(summaries._format_remaining(0), "0:00")
+
+    def test_negative(self):
+        self.assertEqual(summaries._format_remaining(-5), "0:00")
+
+    def test_seconds_only(self):
+        self.assertEqual(summaries._format_remaining(45), "0:45")
+
+    def test_one_minute(self):
+        self.assertEqual(summaries._format_remaining(60), "1:00")
+
+    def test_minutes_and_seconds(self):
+        self.assertEqual(summaries._format_remaining(125), "2:05")
+
+    def test_pads_seconds(self):
+        self.assertEqual(summaries._format_remaining(3601), "60:01")
+
+
 if __name__ == "__main__":
     unittest.main()
