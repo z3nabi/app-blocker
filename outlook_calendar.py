@@ -85,6 +85,28 @@ def _event_covers(event: dict, now: datetime) -> bool:
     return start <= now < end
 
 
+def events_on_date(events: list[dict], target: date) -> list[tuple[datetime, dict]]:
+    """Return (start, event) pairs whose start falls on `target`, sorted by start.
+
+    Strips tzinfo so date comparison matches the local-naive convention used
+    elsewhere (datetime.now(), date.today()). Skips entries with missing or
+    malformed start fields.
+
+    Necessary because the cache file persists across days: if no successful
+    sync has run today, the cache may still hold events from a prior day.
+    """
+    out: list[tuple[datetime, dict]] = []
+    for ev in events:
+        try:
+            start = datetime.fromisoformat(ev["start"]).replace(tzinfo=None)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start.date() == target:
+            out.append((start, ev))
+    out.sort(key=lambda p: p[0])
+    return out
+
+
 _EMPTY_CACHE = {
     "lastSyncAt": None,
     "lastSyncOk": False,

@@ -103,6 +103,47 @@ class TestEventCovers(unittest.TestCase):
         self.assertTrue(outlook_calendar._event_covers(ev, datetime(2026, 5, 9, 10, 0, 0)))
 
 
+class TestEventsOnDate(unittest.TestCase):
+    """events_on_date filters cached events to a single day. The cache file
+    persists across days, so consumers that want today's events must filter
+    explicitly — the cache may hold yesterday's events if no successful sync
+    has run today."""
+
+    def _ev(self, start, end):
+        return {"start": start, "end": end, "subject": "x", "isAllDay": False}
+
+    def test_filters_to_target_date_and_sorts(self):
+        events = [
+            self._ev("2026-05-10T11:00:00", "2026-05-10T12:00:00"),
+            self._ev("2026-05-09T15:00:00", "2026-05-09T16:00:00"),
+            self._ev("2026-05-10T09:00:00", "2026-05-10T10:00:00"),
+        ]
+        out = outlook_calendar.events_on_date(events, date(2026, 5, 10))
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0][0].hour, 9)
+        self.assertEqual(out[1][0].hour, 11)
+
+    def test_excludes_yesterdays_events(self):
+        # The bug we're fixing: yesterday's events appearing as today's
+        # because the cache wasn't refreshed.
+        events = [self._ev("2026-05-09T15:00:00", "2026-05-09T16:00:00")]
+        self.assertEqual(outlook_calendar.events_on_date(events, date(2026, 5, 10)), [])
+
+    def test_handles_tz_aware_iso_strings(self):
+        events = [self._ev("2026-05-10T09:00:00+02:00", "2026-05-10T10:00:00+02:00")]
+        out = outlook_calendar.events_on_date(events, date(2026, 5, 10))
+        self.assertEqual(len(out), 1)
+
+    def test_skips_malformed_events(self):
+        events = [
+            {},  # missing keys
+            self._ev("not-a-date", "2026-05-10T10:00:00"),
+            self._ev("2026-05-10T09:00:00", "2026-05-10T10:00:00"),
+        ]
+        out = outlook_calendar.events_on_date(events, date(2026, 5, 10))
+        self.assertEqual(len(out), 1)
+
+
 class TestCacheIO(unittest.TestCase):
     def test_load_missing_file_returns_empty(self):
         with tempfile.TemporaryDirectory() as d:

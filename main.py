@@ -19,7 +19,7 @@ import sys
 import time
 import tkinter as tk
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -557,23 +557,18 @@ class MainWindow:
         for child in self.cal_list_frame.winfo_children():
             child.destroy()
         cache = outlook_calendar._snapshot_cache()
-        events = cache.get("events", [])
-        if not events:
+        # Filter explicitly: cache may hold prior-day events if no successful
+        # sync has run today (e.g., Outlook closed at startup).
+        todays = outlook_calendar.events_on_date(cache.get("events", []), date.today())
+        if not todays:
             tk.Label(
                 self.cal_list_frame, text="No Deep Work events today.", bg=WHITE, fg=INK2,
                 font=(_FONT_CACHE["serif"], 14),
             ).pack(anchor="w")
         else:
-            sortable = []
-            for ev in events:
+            for start, ev in todays:
                 try:
-                    sortable.append((datetime.fromisoformat(ev["start"]), ev))
-                except (KeyError, ValueError):
-                    continue
-            sortable.sort(key=lambda pair: pair[0])
-            for start, ev in sortable:
-                try:
-                    end = datetime.fromisoformat(ev["end"])
+                    end = datetime.fromisoformat(ev["end"]).replace(tzinfo=None)
                 except (KeyError, ValueError):
                     continue
                 line = f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}    {ev.get('subject', '')}"
