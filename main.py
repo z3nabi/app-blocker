@@ -111,6 +111,12 @@ class MainWindow:
         self.root.geometry("1100x720")
         self.root.minsize(940, 600)
         self.root.configure(bg=PAPER)
+        icon_path = Path(__file__).resolve().parent / "assets" / "stillwater.ico"
+        if icon_path.is_file():
+            try:
+                self.root.iconbitmap(default=str(icon_path))
+            except tk.TclError:
+                pass
         init_fonts(self.root)
 
     def _setup_styles(self) -> None:
